@@ -1,0 +1,17 @@
+# Binários
+/bin/
+/kubeforge
+*.exe
+
+# SQLite
+*.db
+*.db-journal
+
+# Variáveis de ambiente
+.env
+
+# Go
+/vendor/
+
+# SO / editores
+.DS_Store
