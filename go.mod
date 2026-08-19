@@ -1,3 +1,3 @@
-module github.com/SEU_USUARIO/kubeforge
+module github.com/lucasfeitozas/kubeforge
 
 go 1.23
