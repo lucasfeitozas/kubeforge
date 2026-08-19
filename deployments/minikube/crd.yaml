@@ -1,0 +1,166 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: kubeforgecomponents.kubeforge.io
+spec:
+  group: kubeforge.io
+  names:
+    kind: KubeForgeComponent
+    listKind: KubeForgeComponentList
+    plural: kubeforgecomponents
+    singular: kubeforgecomponent
+    shortNames:
+      - kfc
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: ["source", "resources", "runtime", "targetContext"]
+              properties:
+                source:
+                  type: object
+                  required: ["repoUrl", "ref"]
+                  properties:
+                    repoUrl:
+                      type: string
+                    ref:
+                      type: object
+                      properties:
+                        type:
+                          type: string
+                          enum: ["branch", "tag", "commit"]
+                        value:
+                          type: string
+                    subPath:
+                      type: string
+                    credentialsSecretRef:
+                      type: string
+                build:
+                  type: object
+                  properties:
+                    strategy:
+                      type: string
+                      enum: ["local-docker", "kaniko", "buildpacks"]
+                      default: "local-docker"
+                    dockerfilePath:
+                      type: string
+                    cacheEnabled:
+                      type: boolean
+                    imageTagStrategy:
+                      type: string
+                      enum: ["commit-sha", "timestamp", "semver"]
+                resources:
+                  type: object
+                  properties:
+                    requests:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    limits:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    storage:
+                      type: object
+                      properties:
+                        type:
+                          type: string
+                          enum: ["ephemeral", "pvc"]
+                        sizeLimit:
+                          type: string
+                        pvc:
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                runtime:
+                  type: object
+                  required: ["workloadKind"]
+                  properties:
+                    workloadKind:
+                      type: string
+                      enum: ["Pod", "Job", "Deployment"]
+                    replicas:
+                      type: integer
+                    command:
+                      type: array
+                      items:
+                        type: string
+                    args:
+                      type: array
+                      items:
+                        type: string
+                    env:
+                      type: array
+                      items:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                    restartPolicy:
+                      type: string
+                hooks:
+                  type: object
+                  properties:
+                    preRun:
+                      type: array
+                      items:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                    postRun:
+                      type: array
+                      items:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                targetContext:
+                  type: object
+                  required: ["cluster"]
+                  properties:
+                    cluster:
+                      type: string
+                      enum: ["minikube", "eks"]
+                      default: "minikube"
+                    kubeconfigSecretRef:
+                      type: string
+                    namespace:
+                      type: string
+                lifecycle:
+                  type: object
+                  properties:
+                    ttlSecondsAfterFinished:
+                      type: integer
+                      default: 3600
+                    activeDeadlineSeconds:
+                      type: integer
+                      default: 1800
+                    cleanupPolicy:
+                      type: string
+                      enum: ["onSuccess", "onFailure", "onSuccessAndFailure", "manual"]
+                      default: "onSuccessAndFailure"
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum: ["Pending", "Building", "Built", "Running", "Succeeded", "Failed", "CleanedUp"]
+                buildImageDigest:
+                  type: string
+                startTime:
+                  type: string
+                  format: date-time
+                completionTime:
+                  type: string
+                  format: date-time
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Kind
+          type: string
+          jsonPath: .spec.runtime.workloadKind
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
