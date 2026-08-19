@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
+
+	"github.com/lucasfeitozas/kubeforge/internal/k8s"
 )
 
 type config struct {
@@ -23,6 +27,27 @@ func main() {
 		"http_port", cfg.httpPort,
 		"kubeconfig", cfg.kubeconfig,
 		"db_path", cfg.dbPath,
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	provider := k8s.NewMinikubeProvider(cfg.kubeconfig)
+	clientset, err := provider.GetClientset(ctx, k8s.MinikubeClusterKey)
+	if err != nil {
+		slog.Error("falha ao conectar ao cluster Minikube", "kubeconfig", cfg.kubeconfig, "error", err)
+		os.Exit(1)
+	}
+
+	serverVersion, err := clientset.Discovery().ServerVersion()
+	if err != nil {
+		slog.Error("falha ao obter versão do cluster Kubernetes", "error", err)
+		os.Exit(1)
+	}
+
+	slog.Info("conectado ao cluster Minikube",
+		"kubernetes_version", serverVersion.GitVersion,
+		"platform", serverVersion.Platform,
 	)
 }
 
