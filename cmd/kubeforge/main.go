@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lucasfeitozas/kubeforge/internal/k8s"
+	"github.com/lucasfeitozas/kubeforge/internal/store"
 )
 
 type config struct {
@@ -28,6 +29,19 @@ func main() {
 		"kubeconfig", cfg.kubeconfig,
 		"db_path", cfg.dbPath,
 	)
+
+	db, err := store.Open(cfg.dbPath)
+	if err != nil {
+		slog.Error("falha ao abrir banco SQLite", "db_path", cfg.dbPath, "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	if err := store.Migrate(db); err != nil {
+		slog.Error("falha ao aplicar migrations", "db_path", cfg.dbPath, "error", err)
+		os.Exit(1)
+	}
+	slog.Info("migrations aplicadas com sucesso", "db_path", cfg.dbPath)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
