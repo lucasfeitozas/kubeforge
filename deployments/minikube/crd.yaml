@@ -154,6 +154,22 @@ spec:
                 completionTime:
                   type: string
                   format: date-time
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: ["type", "status"]
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      message:
+                        type: string
       additionalPrinterColumns:
         - name: Phase
           type: string

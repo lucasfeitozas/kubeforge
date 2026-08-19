@@ -2,7 +2,11 @@ module github.com/lucasfeitozas/kubeforge
 
 go 1.23.0
 
-require k8s.io/client-go v0.32.13
+require (
+	k8s.io/apiextensions-apiserver v0.32.13
+	k8s.io/client-go v0.32.13
+	sigs.k8s.io/yaml v1.4.0
+)
 
 require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
@@ -44,5 +48,4 @@ require (
 	k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738 // indirect
 	sigs.k8s.io/json v0.0.0-20241010143419-9aa6b5e7a4b3 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.2 // indirect
-	sigs.k8s.io/yaml v1.4.0 // indirect
 )
