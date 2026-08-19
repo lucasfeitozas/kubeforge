@@ -21,6 +21,10 @@ func NewComponentRepository(db *sql.DB) ComponentRepository {
 }
 
 func (r *sqliteComponentRepository) Create(ctx context.Context, c *Component) error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+
 	id := uuid.NewString()
 	now := time.Now().UTC().Truncate(time.Millisecond)
 
@@ -84,6 +88,10 @@ func (r *sqliteComponentRepository) List(ctx context.Context) ([]*Component, err
 }
 
 func (r *sqliteComponentRepository) Update(ctx context.Context, c *Component) error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+
 	now := time.Now().UTC().Truncate(time.Millisecond)
 
 	result, err := r.db.ExecContext(ctx, `

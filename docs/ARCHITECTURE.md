@@ -213,6 +213,7 @@ status:
     },
     "resources": {
       "type": "object",
+      "required": ["requests"],
       "properties": {
         "requests": { "type": "object" },
         "limits": { "type": "object" },
@@ -227,6 +228,7 @@ status:
     },
     "runtime": {
       "type": "object",
+      "required": ["workloadKind"],
       "properties": {
         "workloadKind": { "enum": ["Pod", "Job", "Deployment"] },
         "env": { "type": "array" },
