@@ -35,13 +35,15 @@ func (f failIfCalledCloner) Clone(ctx context.Context, spec CloneSpec, destDir s
 }
 
 type stubBuilder struct {
-	result *BuildResult
-	err    error
-	called bool
+	result  *BuildResult
+	err     error
+	called  bool
+	gotSpec BuildSpec
 }
 
 func (s *stubBuilder) Build(ctx context.Context, spec BuildSpec) (*BuildResult, error) {
 	s.called = true
+	s.gotSpec = spec
 	return s.result, s.err
 }
 
@@ -100,7 +102,7 @@ func TestBroker_RunSucesso(t *testing.T) {
 		Executions: executions,
 	}
 
-	if err := broker.Run(ctx, component, t.TempDir()); err != nil {
+	if err := broker.Run(ctx, component, t.TempDir(), false); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 
@@ -152,7 +154,7 @@ func TestBroker_RunFalhaNoClone(t *testing.T) {
 		Executions: executions,
 	}
 
-	err := broker.Run(ctx, component, t.TempDir())
+	err := broker.Run(ctx, component, t.TempDir(), false)
 	if err == nil || !strings.Contains(err.Error(), "clone falhou") {
 		t.Fatalf("Run() error = %v, want erro contendo %q", err, "clone falhou")
 	}
@@ -200,7 +202,7 @@ func TestBroker_RunFalhaNoBuild(t *testing.T) {
 		Executions: executions,
 	}
 
-	err := broker.Run(ctx, component, t.TempDir())
+	err := broker.Run(ctx, component, t.TempDir(), false)
 	if err == nil || !strings.Contains(err.Error(), "docker build falhou") {
 		t.Fatalf("Run() error = %v, want erro contendo %q", err, "docker build falhou")
 	}
@@ -250,7 +252,7 @@ func TestBroker_RunSourceInvalido(t *testing.T) {
 		Executions: executions,
 	}
 
-	err := broker.Run(ctx, component, t.TempDir())
+	err := broker.Run(ctx, component, t.TempDir(), false)
 	if err == nil {
 		t.Fatal("Run() error = nil, want erro por source inválido")
 	}
@@ -261,5 +263,29 @@ func TestBroker_RunSourceInvalido(t *testing.T) {
 	}
 	if got.Phase != store.PhaseFailed {
 		t.Errorf("Phase = %q, want %q", got.Phase, store.PhaseFailed)
+	}
+}
+
+func TestBroker_RunPropagaNoCache(t *testing.T) {
+	ctx := context.Background()
+	components, executions := newBrokerTestDB(t)
+	component := newBrokerTestComponent(t, components, validSourceJSON)
+
+	cloneResult := &CloneResult{Dir: "/tmp/src", CommitSHA: "abcdef1234567890", DockerfilePath: "/tmp/src/Dockerfile"}
+	buildResult := &BuildResult{ImageTag: "kubeforge/carga-cpu:abcdef123456", Digest: "sha256:xyz"}
+	builder := &stubBuilder{result: buildResult}
+
+	broker := &Broker{
+		Cloner:     &stubCloner{result: cloneResult},
+		Builder:    builder,
+		Components: components,
+		Executions: executions,
+	}
+
+	if err := broker.Run(ctx, component, t.TempDir(), true); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !builder.gotSpec.NoCache {
+		t.Error("BuildSpec.NoCache = false, want true (propagado de Run)")
 	}
 }

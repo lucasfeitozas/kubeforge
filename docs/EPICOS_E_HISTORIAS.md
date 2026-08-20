@@ -112,8 +112,8 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E3.S4 — Cache de build simples
 **Como** usuário, **quero** que builds sucessivos do mesmo Componente reaproveitem cache de camadas Docker, **para** builds mais rápidos durante experimentação iterativa.
 - Critérios de aceite:
-  - [ ] Reutiliza o cache padrão do daemon Docker do Minikube (sem flag `--no-cache`)
-  - [ ] Opção explícita para forçar rebuild sem cache
+  - [x] Reutiliza o cache padrão do daemon Docker do Minikube (sem flag `--no-cache`)
+  - [x] Opção explícita para forçar rebuild sem cache
 - Prioridade: baixa
 
 ---

@@ -137,6 +137,35 @@ func TestDockerBuilderBuild(t *testing.T) {
 	}
 }
 
+func TestDockerBuilderBuildNoCache(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	envFile := filepath.Join(t.TempDir(), "env")
+	writeFakeDocker(t, argsFile, envFile, 0)
+
+	cloneResult := newTestCloneResult(t)
+	builder := &DockerBuilder{DockerEnv: stubDockerEnvResolver{env: map[string]string{}}}
+
+	_, err := builder.Build(context.Background(), BuildSpec{
+		CloneResult:     cloneResult,
+		ImageRepository: "kubeforge/carga-cpu",
+		NoCache:         true,
+	})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	gotArgs, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("lendo args capturados: %v", err)
+	}
+	wantTag := "kubeforge/carga-cpu:abcdef123456"
+	wantArgs := []string{"build", "--no-cache", "-t", wantTag, "-f", cloneResult.DockerfilePath, cloneResult.Dir}
+	args := strings.Fields(string(gotArgs))
+	if strings.Join(args, " ") != strings.Join(wantArgs, " ") {
+		t.Fatalf("args recebidos pelo docker fake = %v, want %v", args, wantArgs)
+	}
+}
+
 func TestDockerBuilderBuildFalhaPreservaLog(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	envFile := filepath.Join(t.TempDir(), "env")

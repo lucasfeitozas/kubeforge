@@ -24,6 +24,10 @@ type BuildSpec struct {
 	// ImageTagStrategy é a estratégia de tag (build.imageTagStrategy). Vazio
 	// usa ImageTagStrategyCommitSHA, o default do MVP.
 	ImageTagStrategy string
+	// NoCache força `docker build --no-cache`, ignorando o cache de camadas
+	// do daemon Docker do Minikube (E3.S4). false (default) preserva o
+	// comportamento atual — cache reaproveitado normalmente.
+	NoCache bool
 }
 
 // BuildResult descreve o resultado de uma build de imagem.
@@ -86,11 +90,12 @@ func (b *DockerBuilder) Build(ctx context.Context, spec BuildSpec) (*BuildResult
 	}
 
 	buildContext := filepath.Dir(spec.CloneResult.DockerfilePath)
-	cmd := exec.CommandContext(ctx, "docker", "build",
-		"-t", tag,
-		"-f", spec.CloneResult.DockerfilePath,
-		buildContext,
-	)
+	args := []string{"build"}
+	if spec.NoCache {
+		args = append(args, "--no-cache")
+	}
+	args = append(args, "-t", tag, "-f", spec.CloneResult.DockerfilePath, buildContext)
+	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Env = mergeEnv(os.Environ(), dockerEnv)
 
 	var log bytes.Buffer

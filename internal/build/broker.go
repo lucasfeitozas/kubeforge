@@ -60,7 +60,11 @@ type Broker struct {
 // houver), já tendo persistido o estado Failed correspondente no Componente
 // e na Execution — quem chama Run não precisa (mas pode) reconsultá-los para
 // saber o que houve.
-func (b *Broker) Run(ctx context.Context, component *store.Component, cloneDestDir string) error {
+//
+// noCache força `docker build --no-cache` apenas nesta execução (E3.S4),
+// sem afetar o cache de builds futuros nem persistir a escolha no
+// Componente.
+func (b *Broker) Run(ctx context.Context, component *store.Component, cloneDestDir string, noCache bool) error {
 	execution := &store.Execution{ComponentID: component.ID}
 	if err := b.Executions.Create(ctx, execution); err != nil {
 		return fmt.Errorf("criando execution para o componente %q: %w", component.ID, err)
@@ -84,7 +88,7 @@ func (b *Broker) Run(ctx context.Context, component *store.Component, cloneDestD
 		return b.fail(ctx, component.ID, execution.ID, startedAt, fmt.Errorf("clonando componente %q: %w", component.ID, err))
 	}
 
-	buildSpec, err := buildBuildSpec(component.Build, *cloneResult)
+	buildSpec, err := buildBuildSpec(component.Build, *cloneResult, noCache)
 	if err != nil {
 		return b.fail(ctx, component.ID, execution.ID, startedAt, fmt.Errorf("interpretando build do componente %q: %w", component.ID, err))
 	}
@@ -144,7 +148,7 @@ func buildCloneSpec(rawSource json.RawMessage) (CloneSpec, error) {
 	return spec, nil
 }
 
-func buildBuildSpec(rawBuild json.RawMessage, cloneResult CloneResult) (BuildSpec, error) {
+func buildBuildSpec(rawBuild json.RawMessage, cloneResult CloneResult, noCache bool) (BuildSpec, error) {
 	var bb brokerBuildBlock
 	if len(rawBuild) > 0 {
 		if err := json.Unmarshal(rawBuild, &bb); err != nil {
@@ -155,5 +159,6 @@ func buildBuildSpec(rawBuild json.RawMessage, cloneResult CloneResult) (BuildSpe
 		CloneResult:      cloneResult,
 		ImageRepository:  bb.ImageRepository,
 		ImageTagStrategy: bb.ImageTagStrategy,
+		NoCache:          noCache,
 	}, nil
 }
