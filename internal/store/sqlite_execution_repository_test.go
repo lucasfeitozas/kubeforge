@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"time"
 )
 
 func newExecutionRepo(t *testing.T) (ExecutionRepository, *sql.DB) {
@@ -141,5 +142,62 @@ func TestExecutionRepository_UpdateBuildLogNaoEncontrada(t *testing.T) {
 	err := repo.UpdateBuildLog(context.Background(), "id-inexistente", "tag", "log")
 	if !errors.Is(err, ErrExecutionNotFound) {
 		t.Fatalf("UpdateBuildLog() error = %v, want ErrExecutionNotFound", err)
+	}
+}
+
+func TestExecutionRepository_UpdatePhase(t *testing.T) {
+	ctx := context.Background()
+	repo, db := newExecutionRepo(t)
+	c := newTestComponentForExecution(t, db)
+
+	e := &Execution{ComponentID: c.ID}
+	if err := repo.Create(ctx, e); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	started := time.Now().UTC().Truncate(time.Millisecond)
+	if err := repo.UpdatePhase(ctx, e.ID, "Running", &started, nil); err != nil {
+		t.Fatalf("UpdatePhase() error = %v", err)
+	}
+
+	got, err := repo.Get(ctx, e.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Phase != "Running" {
+		t.Errorf("Phase = %q, want %q", got.Phase, "Running")
+	}
+	if got.StartedAt == nil || !got.StartedAt.Equal(started) {
+		t.Errorf("StartedAt = %v, want %v", got.StartedAt, started)
+	}
+	if got.CompletedAt != nil {
+		t.Errorf("CompletedAt = %v, want nil", got.CompletedAt)
+	}
+
+	completed := started.Add(5 * time.Second)
+	if err := repo.UpdatePhase(ctx, e.ID, "Succeeded", &started, &completed); err != nil {
+		t.Fatalf("UpdatePhase() error = %v", err)
+	}
+
+	got, err = repo.Get(ctx, e.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Phase != "Succeeded" {
+		t.Errorf("Phase = %q, want %q", got.Phase, "Succeeded")
+	}
+	if got.StartedAt == nil || !got.StartedAt.Equal(started) {
+		t.Errorf("StartedAt = %v, want %v", got.StartedAt, started)
+	}
+	if got.CompletedAt == nil || !got.CompletedAt.Equal(completed) {
+		t.Errorf("CompletedAt = %v, want %v", got.CompletedAt, completed)
+	}
+}
+
+func TestExecutionRepository_UpdatePhaseNaoEncontrada(t *testing.T) {
+	repo, _ := newExecutionRepo(t)
+	err := repo.UpdatePhase(context.Background(), "id-inexistente", "Running", nil, nil)
+	if !errors.Is(err, ErrExecutionNotFound) {
+		t.Fatalf("UpdatePhase() error = %v, want ErrExecutionNotFound", err)
 	}
 }

@@ -29,12 +29,13 @@ func (r *sqliteComponentRepository) Create(ctx context.Context, c *Component) er
 	now := time.Now().UTC().Truncate(time.Millisecond)
 
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO components (id, nome, descricao, source, build, resources, runtime, hooks, target_context, lifecycle, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO components (id, nome, descricao, source, build, resources, runtime, hooks, target_context, lifecycle, phase, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		id, c.Nome, nullString(c.Descricao),
 		string(c.Source), nullJSON(c.Build), string(c.Resources), string(c.Runtime),
 		nullJSON(c.Hooks), string(c.TargetContext), nullJSON(c.Lifecycle),
+		PhasePending,
 		now.Format(timeLayout), now.Format(timeLayout),
 	)
 	if err != nil {
@@ -42,6 +43,7 @@ func (r *sqliteComponentRepository) Create(ctx context.Context, c *Component) er
 	}
 
 	c.ID = id
+	c.Phase = PhasePending
 	c.CreatedAt = now
 	c.UpdatedAt = now
 	return nil
@@ -49,7 +51,7 @@ func (r *sqliteComponentRepository) Create(ctx context.Context, c *Component) er
 
 func (r *sqliteComponentRepository) Get(ctx context.Context, id string) (*Component, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, nome, descricao, source, build, resources, runtime, hooks, target_context, lifecycle, created_at, updated_at
+		SELECT id, nome, descricao, source, build, resources, runtime, hooks, target_context, lifecycle, phase, build_image_digest, error_message, created_at, updated_at
 		FROM components WHERE id = ?
 	`, id)
 
@@ -65,7 +67,7 @@ func (r *sqliteComponentRepository) Get(ctx context.Context, id string) (*Compon
 
 func (r *sqliteComponentRepository) List(ctx context.Context) ([]*Component, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, nome, descricao, source, build, resources, runtime, hooks, target_context, lifecycle, created_at, updated_at
+		SELECT id, nome, descricao, source, build, resources, runtime, hooks, target_context, lifecycle, phase, build_image_digest, error_message, created_at, updated_at
 		FROM components ORDER BY created_at, rowid
 	`)
 	if err != nil {
@@ -120,6 +122,26 @@ func (r *sqliteComponentRepository) Update(ctx context.Context, c *Component) er
 	return nil
 }
 
+func (r *sqliteComponentRepository) UpdateBuildStatus(ctx context.Context, id, phase, buildImageDigest, errorMessage string) error {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE components SET phase = ?, build_image_digest = ?, error_message = ?, updated_at = ? WHERE id = ?
+	`, phase, nullString(buildImageDigest), nullString(errorMessage), now.Format(timeLayout), id)
+	if err != nil {
+		return fmt.Errorf("atualizando status de build do componente %q: %w", id, err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("atualizando status de build do componente %q: %w", id, err)
+	}
+	if affected == 0 {
+		return ErrComponentNotFound
+	}
+	return nil
+}
+
 func (r *sqliteComponentRepository) Delete(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, `DELETE FROM components WHERE id = ?`, id)
 	if err != nil {
@@ -147,6 +169,8 @@ func scanComponent(row rowScanner) (*Component, error) {
 		c                                  Component
 		descricao, build, hooks, lifecycle sql.NullString
 		source, resources, runtime, target string
+		phase                              string
+		buildImageDigest, errorMessage     sql.NullString
 		createdAt, updatedAt               string
 	)
 
@@ -154,6 +178,7 @@ func scanComponent(row rowScanner) (*Component, error) {
 		&c.ID, &c.Nome, &descricao,
 		&source, &build, &resources, &runtime,
 		&hooks, &target, &lifecycle,
+		&phase, &buildImageDigest, &errorMessage,
 		&createdAt, &updatedAt,
 	); err != nil {
 		return nil, err
@@ -167,6 +192,9 @@ func scanComponent(row rowScanner) (*Component, error) {
 	c.Hooks = nullableRawMessage(hooks)
 	c.TargetContext = json.RawMessage(target)
 	c.Lifecycle = nullableRawMessage(lifecycle)
+	c.Phase = phase
+	c.BuildImageDigest = buildImageDigest.String
+	c.ErrorMessage = errorMessage.String
 
 	parsedCreatedAt, err := time.Parse(timeLayout, createdAt)
 	if err != nil {
@@ -201,4 +229,15 @@ func nullableRawMessage(s sql.NullString) json.RawMessage {
 		return nil
 	}
 	return json.RawMessage(s.String)
+}
+
+// nullTime formata t no timeLayout do pacote, ou devolve nil (SQL NULL)
+// quando t é nil — usado por sqliteExecutionRepository.UpdatePhase para não
+// sobrescrever started_at/completed_at quando o chamador ainda não tem um
+// valor para aquele campo.
+func nullTime(t *time.Time) any {
+	if t == nil {
+		return nil
+	}
+	return t.Format(timeLayout)
 }

@@ -99,6 +99,24 @@ func (r *sqliteExecutionRepository) UpdateBuildLog(ctx context.Context, id, imag
 	return nil
 }
 
+func (r *sqliteExecutionRepository) UpdatePhase(ctx context.Context, id, phase string, startedAt, completedAt *time.Time) error {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE executions SET phase = ?, started_at = ?, completed_at = ? WHERE id = ?
+	`, phase, nullTime(startedAt), nullTime(completedAt), id)
+	if err != nil {
+		return fmt.Errorf("atualizando fase da execution %q: %w", id, err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("atualizando fase da execution %q: %w", id, err)
+	}
+	if affected == 0 {
+		return ErrExecutionNotFound
+	}
+	return nil
+}
+
 func scanExecution(row rowScanner) (*Execution, error) {
 	var (
 		e                               Execution

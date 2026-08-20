@@ -541,6 +541,28 @@ para o racional completo e as alternativas descartadas.
 
 > Ambas continuam respeitando o schema `spec.build.strategy` definido na seção 2 — só muda a implementação por trás, sem impacto no modelo de dados.
 
+#### 7.3.2 Status de build
+
+Após `docker build`, o Build Broker (`internal/build.Broker`) atualiza
+`status.phase`/`status.buildImageDigest`/mensagem de erro do Componente
+(`Pending → Building → Built/Failed`) e a fase da `execution`
+correspondente (`Pending → Running → Succeeded/Failed`):
+
+- No MVP (sem Controller/CR ainda implementado — seção 4.2 permanece o
+  desenho-alvo para quando o Execution Engine existir), esses campos são
+  colunas da tabela `components` no Metadata Store (SQLite), não o `status`
+  de um `KubeForgeComponent` no cluster.
+- `buildImageDigest` é o **Image ID local** do daemon Docker
+  (`docker image inspect --format '{{.Id}}'`), não um digest de registry —
+  consequência direta de a Opção A (seção 7.3) buildar sem `docker push`.
+  Isso muda se/quando a Opção B (Kaniko, seção 7.3.1) virar o Builder ativo.
+- Falha em qualquer etapa (clone, build ou na própria captura do digest)
+  marca o Componente como `Failed`, com a mensagem de erro persistida —
+  nunca um estado ambíguo.
+
+Ver `docs/adrs/0003-status-de-build-no-componente.md` para o racional
+completo e as alternativas descartadas.
+
 ### 7.4 Teardown — o que muda
 
 - Continua valendo `ttlSecondsAfterFinished` e `activeDeadlineSeconds` (seção 5) — são gratuitos e nativos do K8s, não há razão para removê-los mesmo em cenário pessoal.

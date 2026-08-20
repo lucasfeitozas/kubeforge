@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // BuildSpec descreve uma build de imagem a partir do resultado de um clone
@@ -32,6 +33,12 @@ type BuildResult struct {
 	// CommitSHA é o commit efetivamente buildado (mesmo valor de
 	// BuildSpec.CloneResult.CommitSHA, repetido aqui por conveniência).
 	CommitSHA string
+	// Digest é o Image ID local (`docker image inspect --format '{{.Id}}'`),
+	// usado como status.buildImageDigest do Componente. No MVP (build local
+	// sem push a um registry, Opção A de docs/ARCHITECTURE.md §7.3) não há
+	// digest de registry real disponível; o Image ID do daemon Docker é o
+	// identificador estável mais próximo.
+	Digest string
 	// Log é a saída combinada (stdout+stderr) do `docker build`.
 	Log string
 }
@@ -94,11 +101,34 @@ func (b *DockerBuilder) Build(ctx context.Context, spec BuildSpec) (*BuildResult
 		return &BuildResult{Log: log.String()}, fmt.Errorf("docker build falhou: %w", err)
 	}
 
+	digest, err := inspectImageDigest(ctx, tag, cmd.Env)
+	if err != nil {
+		return &BuildResult{ImageTag: tag, CommitSHA: spec.CloneResult.CommitSHA, Log: log.String()},
+			fmt.Errorf("docker image inspect falhou: %w", err)
+	}
+
 	return &BuildResult{
 		ImageTag:  tag,
 		CommitSHA: spec.CloneResult.CommitSHA,
+		Digest:    digest,
 		Log:       log.String(),
 	}, nil
+}
+
+// inspectImageDigest resolve o Image ID local da tag recém-buildada via
+// `docker image inspect --format '{{.Id}}'`, reaproveitando o mesmo
+// ambiente (env) usado no `docker build` para apontar ao daemon correto.
+func inspectImageDigest(ctx context.Context, tag string, env []string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{.Id}}", tag)
+	cmd.Env = env
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out.String()), nil
 }
 
 // mergeEnv combina base (tipicamente os.Environ()) com overrides, onde

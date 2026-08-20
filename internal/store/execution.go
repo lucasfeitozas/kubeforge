@@ -12,9 +12,8 @@ type Execution struct {
 	ID          string
 	ComponentID string
 	// Phase reflete o CHECK da tabela: Pending, Running, Succeeded ou
-	// Failed. A máquina de estados completa (transições, mensagens de
-	// falha) é escopo de E3.S3 — este repositório só preenche o default
-	// 'Pending' na criação e não altera Phase depois.
+	// Failed. Preenchido com 'Pending' na criação (ver Create) e avançado
+	// pelo Build Broker via UpdatePhase (ver internal/build.Broker).
 	Phase       string
 	StartedAt   *time.Time
 	CompletedAt *time.Time
@@ -46,4 +45,8 @@ type ExecutionRepository interface {
 	// docker build, associando-os à execution correspondente. Retorna
 	// ErrExecutionNotFound se o id não existir.
 	UpdateBuildLog(ctx context.Context, id, imageTag, buildLog string) error
+	// UpdatePhase avança a fase de uma execution (Running, Succeeded ou
+	// Failed) e registra startedAt/completedAt quando não nulos. Retorna
+	// ErrExecutionNotFound se o id não existir.
+	UpdatePhase(ctx context.Context, id, phase string, startedAt, completedAt *time.Time) error
 }
