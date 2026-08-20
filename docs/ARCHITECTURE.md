@@ -513,6 +513,27 @@ docker build -t kubeforge/carga-cpu:local .
 - **Vantagem:** zero peças extras (sem Kaniko Job, sem registry local, sem ECR).
 - **Trade-off:** não é portável direto para EKS (lá não existe "docker daemon do cluster" acessível assim) — quando/se você quiser testar em EKS futuramente, troca-se a implementação do Build Broker para a Opção B, mantendo o mesmo contrato `spec.build.strategy`.
 
+#### 7.3.0 Clonagem do código-fonte
+
+Antes de invocar `docker build`, o Build Broker (`internal/build`) obtém o
+código-fonte do Componente:
+
+- Clone raso (`git clone --depth=1 --branch <value>`) quando
+  `source.ref.type` é `branch` ou `tag`.
+- Clone completo + `git checkout <value>` quando `source.ref.type` é
+  `commit` (um clone raso não permite alcançar um SHA arbitrário sem saber
+  de antemão sua branch).
+- Repositórios privados são suportados apenas via HTTPS: o token referenciado
+  por `source.credentialsSecretRef` é lido de uma env var local
+  (`KUBEFORGE_GIT_TOKEN_<SECRETREF>`) e embutido na URL como usuário HTTP
+  básico.
+- Após o clone, valida-se a presença de um `Dockerfile` em `source.subPath`
+  (ou na raiz, se omitido) — pré-requisito da Opção A de build (seção 7.3).
+
+A implementação usa o binário `git` do host via `os/exec`, em vez de uma
+lib Git pura em Go — ver `docs/adrs/0001-clonagem-repositorio-git-cli.md`
+para o racional completo e as alternativas descartadas.
+
 #### 7.3.1 Evolução futura (fora do escopo do MVP) — Opção B: Kaniko
 - Ative o **registry addon** do Minikube (`minikube addons enable registry`) — sobe um registry local sem custo.
 - Kaniko builda e faz push para `localhost:5000/...` (ou o endereço do addon).

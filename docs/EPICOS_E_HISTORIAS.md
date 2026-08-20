@@ -89,9 +89,9 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E3.S1 — Clonagem do repositório (branch/tag/commit)
 **Como** sistema, **quero** clonar o repositório informado em `source.repoUrl` respeitando `source.ref` (branch, tag ou commit), **para** obter o código-fonte a ser buildado.
 - Critérios de aceite:
-  - [ ] Clone raso (`--depth=1`) quando `ref.type=branch` ou `tag`
-  - [ ] Checkout específico quando `ref.type=commit`
-  - [ ] Suporte a repositório privado via `credentialsSecretRef` (token lido de env/secret local)
+  - [x] Clone raso (`--depth=1`) quando `ref.type=branch` ou `tag`
+  - [x] Checkout específico quando `ref.type=commit`
+  - [x] Suporte a repositório privado via `credentialsSecretRef` (token lido de env/secret local)
 - Prioridade: alta
 
 ### E3.S2 — Build via `docker build` apontando para o daemon do Minikube
