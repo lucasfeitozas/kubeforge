@@ -97,9 +97,9 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E3.S2 — Build via `docker build` apontando para o daemon do Minikube
 **Como** sistema, **quero** executar `docker build` usando as variáveis de ambiente equivalentes a `minikube docker-env`, **para** que a imagem fique disponível diretamente ao cluster.
 - Critérios de aceite:
-  - [ ] Build Broker injeta as env vars do `minikube docker-env` no processo do build (sem depender do usuário rodar `eval` manualmente)
-  - [ ] Tag da imagem segue `imageTagStrategy` (`commit-sha` como padrão do MVP)
-  - [ ] Logs do build persistidos e associados à `execution` correspondente
+  - [x] Build Broker injeta as env vars do `minikube docker-env` no processo do build (sem depender do usuário rodar `eval` manualmente)
+  - [x] Tag da imagem segue `imageTagStrategy` (`commit-sha` como padrão do MVP)
+  - [x] Logs do build persistidos e associados à `execution` correspondente
 - Prioridade: alta
 
 ### E3.S3 — Atualização de status de build
