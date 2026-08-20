@@ -89,31 +89,31 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E3.S1 — Clonagem do repositório (branch/tag/commit)
 **Como** sistema, **quero** clonar o repositório informado em `source.repoUrl` respeitando `source.ref` (branch, tag ou commit), **para** obter o código-fonte a ser buildado.
 - Critérios de aceite:
-  - [ ] Clone raso (`--depth=1`) quando `ref.type=branch` ou `tag`
-  - [ ] Checkout específico quando `ref.type=commit`
-  - [ ] Suporte a repositório privado via `credentialsSecretRef` (token lido de env/secret local)
+  - [x] Clone raso (`--depth=1`) quando `ref.type=branch` ou `tag`
+  - [x] Checkout específico quando `ref.type=commit`
+  - [x] Suporte a repositório privado via `credentialsSecretRef` (token lido de env/secret local)
 - Prioridade: alta
 
 ### E3.S2 — Build via `docker build` apontando para o daemon do Minikube
 **Como** sistema, **quero** executar `docker build` usando as variáveis de ambiente equivalentes a `minikube docker-env`, **para** que a imagem fique disponível diretamente ao cluster.
 - Critérios de aceite:
-  - [ ] Build Broker injeta as env vars do `minikube docker-env` no processo do build (sem depender do usuário rodar `eval` manualmente)
-  - [ ] Tag da imagem segue `imageTagStrategy` (`commit-sha` como padrão do MVP)
-  - [ ] Logs do build persistidos e associados à `execution` correspondente
+  - [x] Build Broker injeta as env vars do `minikube docker-env` no processo do build (sem depender do usuário rodar `eval` manualmente)
+  - [x] Tag da imagem segue `imageTagStrategy` (`commit-sha` como padrão do MVP)
+  - [x] Logs do build persistidos e associados à `execution` correspondente
 - Prioridade: alta
 
 ### E3.S3 — Atualização de status de build
 **Como** usuário, **quero** ver o status do build (`Pending → Building → Built/Failed`) refletido no Componente, **para** saber quando ele está pronto para execução.
 - Critérios de aceite:
-  - [ ] Campo `status.phase` e `status.buildImageDigest` atualizados ao final do build
-  - [ ] Falha de build não deixa o Componente em estado ambíguo (`Failed` explícito + mensagem de erro)
+  - [x] Campo `status.phase` e `status.buildImageDigest` atualizados ao final do build
+  - [x] Falha de build não deixa o Componente em estado ambíguo (`Failed` explícito + mensagem de erro)
 - Prioridade: alta
 
 ### E3.S4 — Cache de build simples
 **Como** usuário, **quero** que builds sucessivos do mesmo Componente reaproveitem cache de camadas Docker, **para** builds mais rápidos durante experimentação iterativa.
 - Critérios de aceite:
-  - [ ] Reutiliza o cache padrão do daemon Docker do Minikube (sem flag `--no-cache`)
-  - [ ] Opção explícita para forçar rebuild sem cache
+  - [x] Reutiliza o cache padrão do daemon Docker do Minikube (sem flag `--no-cache`)
+  - [x] Opção explícita para forçar rebuild sem cache
 - Prioridade: baixa
 
 ---
