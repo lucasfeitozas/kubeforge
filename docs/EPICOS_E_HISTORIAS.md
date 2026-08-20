@@ -105,8 +105,8 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E3.S3 — Atualização de status de build
 **Como** usuário, **quero** ver o status do build (`Pending → Building → Built/Failed`) refletido no Componente, **para** saber quando ele está pronto para execução.
 - Critérios de aceite:
-  - [ ] Campo `status.phase` e `status.buildImageDigest` atualizados ao final do build
-  - [ ] Falha de build não deixa o Componente em estado ambíguo (`Failed` explícito + mensagem de erro)
+  - [x] Campo `status.phase` e `status.buildImageDigest` atualizados ao final do build
+  - [x] Falha de build não deixa o Componente em estado ambíguo (`Failed` explícito + mensagem de erro)
 - Prioridade: alta
 
 ### E3.S4 — Cache de build simples

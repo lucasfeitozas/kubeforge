@@ -35,6 +35,102 @@ func newTestComponent(nome string) *Component {
 	}
 }
 
+func TestComponentRepository_CreateSetsInitialPhase(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newComponentRepo(t)
+
+	c := newTestComponent("componente-inicial")
+	if err := repo.Create(ctx, c); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if c.Phase != PhasePending {
+		t.Errorf("Create() Phase = %q, want %q", c.Phase, PhasePending)
+	}
+
+	got, err := repo.Get(ctx, c.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Phase != PhasePending {
+		t.Errorf("Get() Phase = %q, want %q", got.Phase, PhasePending)
+	}
+	if got.BuildImageDigest != "" {
+		t.Errorf("Get() BuildImageDigest = %q, want vazio", got.BuildImageDigest)
+	}
+	if got.ErrorMessage != "" {
+		t.Errorf("Get() ErrorMessage = %q, want vazio", got.ErrorMessage)
+	}
+}
+
+func TestComponentRepository_UpdateBuildStatus(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newComponentRepo(t)
+
+	c := newTestComponent("componente-buildado")
+	if err := repo.Create(ctx, c); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	originalUpdatedAt := c.UpdatedAt
+
+	if err := repo.UpdateBuildStatus(ctx, c.ID, PhaseBuilt, "sha256:abc123", ""); err != nil {
+		t.Fatalf("UpdateBuildStatus() error = %v", err)
+	}
+
+	got, err := repo.Get(ctx, c.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Phase != PhaseBuilt {
+		t.Errorf("Phase = %q, want %q", got.Phase, PhaseBuilt)
+	}
+	if got.BuildImageDigest != "sha256:abc123" {
+		t.Errorf("BuildImageDigest = %q, want %q", got.BuildImageDigest, "sha256:abc123")
+	}
+	if got.ErrorMessage != "" {
+		t.Errorf("ErrorMessage = %q, want vazio", got.ErrorMessage)
+	}
+	if got.UpdatedAt.Before(originalUpdatedAt) {
+		t.Errorf("UpdatedAt = %v, want >= %v", got.UpdatedAt, originalUpdatedAt)
+	}
+}
+
+func TestComponentRepository_UpdateBuildStatusFailed(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newComponentRepo(t)
+
+	c := newTestComponent("componente-com-falha")
+	if err := repo.Create(ctx, c); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	wantMsg := "docker build falhou: exit status 1"
+	if err := repo.UpdateBuildStatus(ctx, c.ID, PhaseFailed, "", wantMsg); err != nil {
+		t.Fatalf("UpdateBuildStatus() error = %v", err)
+	}
+
+	got, err := repo.Get(ctx, c.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Phase != PhaseFailed {
+		t.Errorf("Phase = %q, want %q", got.Phase, PhaseFailed)
+	}
+	if got.ErrorMessage != wantMsg {
+		t.Errorf("ErrorMessage = %q, want %q", got.ErrorMessage, wantMsg)
+	}
+	if got.BuildImageDigest != "" {
+		t.Errorf("BuildImageDigest = %q, want vazio", got.BuildImageDigest)
+	}
+}
+
+func TestComponentRepository_UpdateBuildStatusNaoEncontrado(t *testing.T) {
+	repo, _ := newComponentRepo(t)
+	err := repo.UpdateBuildStatus(context.Background(), "id-inexistente", PhaseBuilt, "sha256:abc", "")
+	if !errors.Is(err, ErrComponentNotFound) {
+		t.Fatalf("UpdateBuildStatus() error = %v, want ErrComponentNotFound", err)
+	}
+}
+
 func TestComponentRepository_CreateAndGet(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := newComponentRepo(t)
