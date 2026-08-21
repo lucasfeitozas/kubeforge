@@ -125,9 +125,9 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E4.S1 — Mapeamento Componente → manifesto Job
 **Como** sistema, **quero** gerar um `batch/v1 Job` a partir de `spec.runtime` + `spec.resources`, **para** executar o Componente como workload de teste.
 - Critérios de aceite:
-  - [ ] `imagePullPolicy: Never` fixado (imagem já está no daemon do Minikube)
-  - [ ] `resources.requests/limits`, `env`, `command`, `args` mapeados corretamente
-  - [ ] `restartPolicy` e `backoffLimit` aplicados conforme spec
+  - [x] `imagePullPolicy: Never` fixado (imagem já está no daemon do Minikube)
+  - [x] `resources.requests/limits`, `env`, `command`, `args` mapeados corretamente
+  - [x] `restartPolicy` e `backoffLimit` aplicados conforme spec
 - Prioridade: alta
 
 ### E4.S2 — Suporte a Init Containers (hooks `preRun`)
