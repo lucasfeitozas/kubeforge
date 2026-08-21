@@ -16,7 +16,7 @@ const MinikubeClusterKey = "minikube"
 // para permitir, no futuro, um provider "eks" sem alterar os consumidores.
 // No MVP existe um único provider registrado: MinikubeProvider.
 type ClusterProvider interface {
-	GetClientset(ctx context.Context, clusterKey string) (*kubernetes.Clientset, error)
+	GetClientset(ctx context.Context, clusterKey string) (kubernetes.Interface, error)
 }
 
 var (

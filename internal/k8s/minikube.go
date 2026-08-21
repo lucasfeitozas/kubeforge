@@ -33,7 +33,7 @@ func NewMinikubeProvider(kubeconfigPath string) *MinikubeProvider {
 
 // GetClientset implementa ClusterProvider. Só aceita clusterKey ==
 // MinikubeClusterKey (único provider registrado no MVP).
-func (p *MinikubeProvider) GetClientset(ctx context.Context, clusterKey string) (*kubernetes.Clientset, error) {
+func (p *MinikubeProvider) GetClientset(ctx context.Context, clusterKey string) (kubernetes.Interface, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

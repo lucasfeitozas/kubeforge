@@ -45,18 +45,32 @@ type jobResourcesBlock struct {
 	Limits   map[string]string `json:"limits"`
 }
 
-// jobHooksBlock espelha o bloco hooks.preRun necessário para montar os
-// InitContainers do Job (E4.S2). postRun não é lido aqui: hooks
-// pós-execução viram um Job separado (docs/ARCHITECTURE.md §4.2, E4.S3),
-// fora do escopo de BuildJob.
+// jobHooksBlock espelha o bloco hooks (preRun/postRun). preRun vira
+// InitContainers do Job principal (E4.S2, via BuildJob); postRun vira um
+// Job de verificação separado (E4.S3, via BuildPostRunJob) —
+// docs/ARCHITECTURE.md §4.2.
 type jobHooksBlock struct {
-	PreRun []jobPreRunItemBlock `json:"preRun"`
+	PreRun  []jobPreRunItemBlock  `json:"preRun"`
+	PostRun []jobPostRunItemBlock `json:"postRun"`
 }
 
 type jobPreRunItemBlock struct {
 	Name    string   `json:"name"`
 	Image   string   `json:"image"`
 	Command []string `json:"command"`
+}
+
+// jobPostRunItemBlock espelha um item de hooks.postRun (docs/ARCHITECTURE.md
+// §2.1). continueOnError não existe em preRun: falha de InitContainer
+// sempre bloqueia nativamente (ADR 0006); postRun roda como Job separado
+// depois que o principal já terminou, então o Controller precisa decidir
+// explicitamente se a falha da verificação deve ou não marcar a execução
+// como Failed (E4.S3, AC2).
+type jobPostRunItemBlock struct {
+	Name            string   `json:"name"`
+	Image           string   `json:"image"`
+	Command         []string `json:"command"`
+	ContinueOnError bool     `json:"continueOnError"`
 }
 
 // BuildJob gera o manifesto batch/v1 Job de um Componente a partir de
@@ -133,6 +147,90 @@ func BuildJob(component *store.Component) (*batchv1.Job, error) {
 		},
 	}
 	return job, nil
+}
+
+// PostRunPlan é o resultado de interpretar hooks.postRun: o Job de
+// verificação a aplicar (Job == nil se hooks.postRun estiver vazio ou
+// ausente — não há nada a criar) e a política de continueOnError agregada
+// dos itens, usada pelo Runner (internal/controller/runner.go) para decidir
+// se a falha do Job de verificação deve interromper o fluxo (E4.S3, AC2).
+type PostRunPlan struct {
+	Job             *batchv1.Job
+	ContinueOnError bool
+}
+
+// postRunJobSuffix separa o nome do Job de verificação do nome do Job
+// principal (que usa component.ID puro, ver BuildJob), evitando colisão de
+// nomes no mesmo namespace.
+const postRunJobSuffix = "-postrun"
+
+// BuildPostRunJob gera o manifesto do Job de verificação pós-execução de um
+// Componente, a partir de hooks.postRun (E4.S3). Cada item do array vira um
+// Container comum do mesmo Pod, não um InitContainer: diferente do Job
+// principal, o Job de verificação não tem um container "main" para servir
+// de gate, então os itens rodam em paralelo (docs/ARCHITECTURE.md §4.2).
+//
+// Como BuildJob, é uma função pura: não recebe k8s.ClusterProvider nem
+// decide Namespace do Job — isso é responsabilidade de quem aplica o
+// manifesto no cluster (ver Runner).
+func BuildPostRunJob(component *store.Component) (*PostRunPlan, error) {
+	var hooks jobHooksBlock
+	if len(component.Hooks) > 0 {
+		if err := json.Unmarshal(component.Hooks, &hooks); err != nil {
+			return nil, fmt.Errorf("interpretando hooks do componente %q: %w", component.ID, err)
+		}
+	}
+	if len(hooks.PostRun) == 0 {
+		return &PostRunPlan{}, nil
+	}
+
+	backoffLimit := int32(0)
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: component.ID + postRunJobSuffix,
+		},
+		Spec: batchv1.JobSpec{
+			BackoffLimit: &backoffLimit,
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					Containers:    toPostRunContainers(hooks.PostRun),
+				},
+			},
+		},
+	}
+
+	return &PostRunPlan{
+		Job:             job,
+		ContinueOnError: postRunContinueOnError(hooks.PostRun),
+	}, nil
+}
+
+func toPostRunContainers(items []jobPostRunItemBlock) []corev1.Container {
+	containers := make([]corev1.Container, 0, len(items))
+	for _, item := range items {
+		containers = append(containers, corev1.Container{
+			Name:    item.Name,
+			Image:   item.Image,
+			Command: item.Command,
+		})
+	}
+	return containers
+}
+
+// postRunContinueOnError agrega o continueOnError de todos os itens de
+// postRun num único booleano: true somente se TODOS os itens declararem
+// continueOnError:true. Qualquer item omitindo o campo (default false do
+// JSON) ou explicitando false derruba a política inteira para false —
+// comportamento fail-safe, consistente com o critério de aceite E4.S3/AC2
+// ("continueOnError: false interrompe o fluxo").
+func postRunContinueOnError(items []jobPostRunItemBlock) bool {
+	for _, item := range items {
+		if !item.ContinueOnError {
+			return false
+		}
+	}
+	return true
 }
 
 func toEnvVars(blocks []jobEnvBlock) []corev1.EnvVar {
