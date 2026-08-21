@@ -213,3 +213,128 @@ func TestBuildJob_HooksJSONInvalido(t *testing.T) {
 		t.Fatal("BuildJob deveria retornar erro para hooks com JSON inválido")
 	}
 }
+
+func TestBuildPostRunJob_CasoCompleto(t *testing.T) {
+	hooks := `{
+		"postRun": [
+			{"name": "verifica-http", "image": "curlimages/curl:8.9.0", "command": ["sh", "-c", "curl -f http://localhost:8080/health"], "continueOnError": true},
+			{"name": "verifica-resultado", "image": "org/verificador:latest", "command": ["/verify.sh"], "continueOnError": false}
+		]
+	}`
+	component := newComponentComHooks(t, `{"workloadKind": "Job"}`, `{}`, hooks)
+
+	plan, err := BuildPostRunJob(component)
+	if err != nil {
+		t.Fatalf("BuildPostRunJob retornou erro inesperado: %v", err)
+	}
+	if plan.Job == nil {
+		t.Fatal("plan.Job = nil, esperava Job de verificação")
+	}
+
+	wantName := component.ID + "-postrun"
+	if plan.Job.Name != wantName {
+		t.Errorf("plan.Job.Name = %q, esperava %q", plan.Job.Name, wantName)
+	}
+	if plan.Job.Spec.BackoffLimit == nil || *plan.Job.Spec.BackoffLimit != 0 {
+		t.Errorf("BackoffLimit = %v, esperava 0", plan.Job.Spec.BackoffLimit)
+	}
+	if plan.Job.Spec.Template.Spec.RestartPolicy != corev1.RestartPolicyNever {
+		t.Errorf("RestartPolicy = %q, esperava %q", plan.Job.Spec.Template.Spec.RestartPolicy, corev1.RestartPolicyNever)
+	}
+
+	containers := plan.Job.Spec.Template.Spec.Containers
+	if len(containers) != 2 {
+		t.Fatalf("Containers tem %d itens, esperava 2", len(containers))
+	}
+	primeiro := containers[0]
+	if primeiro.Name != "verifica-http" || primeiro.Image != "curlimages/curl:8.9.0" {
+		t.Errorf("Containers[0] = %+v, esperava name=verifica-http image=curlimages/curl:8.9.0", primeiro)
+	}
+	segundo := containers[1]
+	if segundo.Name != "verifica-resultado" || segundo.Image != "org/verificador:latest" {
+		t.Errorf("Containers[1] = %+v, esperava name=verifica-resultado image=org/verificador:latest", segundo)
+	}
+
+	if plan.ContinueOnError {
+		t.Error("plan.ContinueOnError = true, esperava false (um item tem continueOnError:false)")
+	}
+}
+
+func TestBuildPostRunJob_SemPostRun(t *testing.T) {
+	component := newComponentComHooks(t, `{"workloadKind": "Job"}`, `{}`, `{"preRun": [{"name": "warmup", "image": "curlimages/curl:8.9.0", "command": ["true"]}]}`)
+
+	plan, err := BuildPostRunJob(component)
+	if err != nil {
+		t.Fatalf("BuildPostRunJob retornou erro inesperado: %v", err)
+	}
+	if plan.Job != nil {
+		t.Errorf("plan.Job = %+v, esperava nil sem hooks.postRun", plan.Job)
+	}
+}
+
+func TestBuildPostRunJob_SemHooks(t *testing.T) {
+	component := newComponent(t, `{"workloadKind": "Job"}`, `{}`)
+
+	plan, err := BuildPostRunJob(component)
+	if err != nil {
+		t.Fatalf("BuildPostRunJob retornou erro inesperado: %v", err)
+	}
+	if plan.Job != nil {
+		t.Errorf("plan.Job = %+v, esperava nil sem hooks", plan.Job)
+	}
+}
+
+func TestBuildPostRunJob_HooksJSONInvalido(t *testing.T) {
+	component := newComponentComHooks(t, `{"workloadKind": "Job"}`, `{}`, `{invalido`)
+
+	_, err := BuildPostRunJob(component)
+	if err == nil {
+		t.Fatal("BuildPostRunJob deveria retornar erro para hooks com JSON inválido")
+	}
+}
+
+func TestPostRunContinueOnError(t *testing.T) {
+	tests := []struct {
+		name  string
+		items []jobPostRunItemBlock
+		want  bool
+	}{
+		{
+			name: "todos true",
+			items: []jobPostRunItemBlock{
+				{Name: "a", ContinueOnError: true},
+				{Name: "b", ContinueOnError: true},
+			},
+			want: true,
+		},
+		{
+			name: "um item omite o campo (default false)",
+			items: []jobPostRunItemBlock{
+				{Name: "a", ContinueOnError: true},
+				{Name: "b"},
+			},
+			want: false,
+		},
+		{
+			name: "um item explicita false",
+			items: []jobPostRunItemBlock{
+				{Name: "a", ContinueOnError: true},
+				{Name: "b", ContinueOnError: false},
+			},
+			want: false,
+		},
+		{
+			name:  "item único true",
+			items: []jobPostRunItemBlock{{Name: "a", ContinueOnError: true}},
+			want:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := postRunContinueOnError(tt.items); got != tt.want {
+				t.Errorf("postRunContinueOnError(%+v) = %v, esperava %v", tt.items, got, tt.want)
+			}
+		})
+	}
+}

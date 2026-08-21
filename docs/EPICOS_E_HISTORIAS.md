@@ -140,8 +140,8 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E4.S3 — Hooks `postRun` como Job separado
 **Como** usuário, **quero** que `spec.hooks.postRun` seja executado como um Job independente após o término do Job principal, **para** rodar verificações sem acoplar ao container original.
 - Critérios de aceite:
-  - [ ] Controller observa `phase: Succeeded/Failed` do Job principal e dispara o Job de verificação
-  - [ ] `continueOnError: false` interrompe o fluxo e marca a execução como `Failed`
+  - [x] Controller observa `phase: Succeeded/Failed` do Job principal e dispara o Job de verificação
+  - [x] `continueOnError: false` interrompe o fluxo e marca a execução como `Failed`
 - Prioridade: média
 
 ### E4.S4 — Acompanhamento de status e logs
