@@ -147,8 +147,8 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E4.S4 — Acompanhamento de status e logs
 **Como** usuário, **quero** consultar o status (`Pending/Running/Succeeded/Failed`) e os logs do Pod em execução, **para** acompanhar o teste sem usar `kubectl` diretamente.
 - Critérios de aceite:
-  - [ ] Endpoint/consulta que reflete o status atual do Job/Pod
-  - [ ] Stream ou tail de logs disponível via API
+  - [x] Endpoint/consulta que reflete o status atual do Job/Pod
+  - [x] Stream ou tail de logs disponível via API
 - Prioridade: alta
 
 ### E4.S5 — Suporte a armazenamento efêmero e PVC
