@@ -133,8 +133,8 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E4.S2 — Suporte a Init Containers (hooks `preRun`)
 **Como** usuário, **quero** que `spec.hooks.preRun` seja traduzido em Init Containers do Job, **para** validar pré-condições antes da execução principal.
 - Critérios de aceite:
-  - [ ] Cada item de `preRun` vira um Init Container na ordem declarada
-  - [ ] Falha de um Init Container impede o container principal de rodar (comportamento nativo do K8s)
+  - [x] Cada item de `preRun` vira um Init Container na ordem declarada
+  - [x] Falha de um Init Container impede o container principal de rodar (comportamento nativo do K8s)
 - Prioridade: média
 
 ### E4.S3 — Hooks `postRun` como Job separado

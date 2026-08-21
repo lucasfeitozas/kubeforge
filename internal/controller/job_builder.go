@@ -45,6 +45,20 @@ type jobResourcesBlock struct {
 	Limits   map[string]string `json:"limits"`
 }
 
+// jobHooksBlock espelha o bloco hooks.preRun necessário para montar os
+// InitContainers do Job (E4.S2). postRun não é lido aqui: hooks
+// pós-execução viram um Job separado (docs/ARCHITECTURE.md §4.2, E4.S3),
+// fora do escopo de BuildJob.
+type jobHooksBlock struct {
+	PreRun []jobPreRunItemBlock `json:"preRun"`
+}
+
+type jobPreRunItemBlock struct {
+	Name    string   `json:"name"`
+	Image   string   `json:"image"`
+	Command []string `json:"command"`
+}
+
 // BuildJob gera o manifesto batch/v1 Job de um Componente a partir de
 // spec.runtime + spec.resources (E4.S1), para executá-lo como workload de
 // teste. BuildJob não aplica o Job no cluster nem decide seu namespace: essas
@@ -78,13 +92,21 @@ func BuildJob(component *store.Component) (*batchv1.Job, error) {
 		return nil, fmt.Errorf("interpretando resources.limits do componente %q: %w", component.ID, err)
 	}
 
+	var hooks jobHooksBlock
+	if len(component.Hooks) > 0 {
+		if err := json.Unmarshal(component.Hooks, &hooks); err != nil {
+			return nil, fmt.Errorf("interpretando hooks do componente %q: %w", component.ID, err)
+		}
+	}
+
 	backoffLimit := int32(0)
 	if rt.BackoffLimit != nil {
 		backoffLimit = *rt.BackoffLimit
 	}
 
 	podSpec := corev1.PodSpec{
-		RestartPolicy: toRestartPolicy(rt.RestartPolicy),
+		RestartPolicy:  toRestartPolicy(rt.RestartPolicy),
+		InitContainers: toInitContainers(hooks.PreRun),
 		Containers: []corev1.Container{{
 			Name:            "main",
 			Image:           component.BuildImageDigest,
@@ -148,6 +170,26 @@ func toResourceList(quantities map[string]string) (corev1.ResourceList, error) {
 		list[corev1.ResourceName(name)] = qty
 	}
 	return list, nil
+}
+
+// toInitContainers traduz hooks.preRun em InitContainers, preservando a
+// ordem declarada no JSON (E4.S2). O Kubernetes já garante nativamente que
+// o container principal só inicia depois que todos os Init Containers
+// terminarem com sucesso, e que a falha de um interrompe o Pod — nenhuma
+// lógica extra de sequenciamento é necessária aqui.
+func toInitContainers(items []jobPreRunItemBlock) []corev1.Container {
+	if len(items) == 0 {
+		return nil
+	}
+	containers := make([]corev1.Container, 0, len(items))
+	for _, item := range items {
+		containers = append(containers, corev1.Container{
+			Name:    item.Name,
+			Image:   item.Image,
+			Command: item.Command,
+		})
+	}
+	return containers
 }
 
 // toRestartPolicy converte runtime.restartPolicy para o tipo do PodSpec.
