@@ -2,13 +2,19 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"time"
 
+	"github.com/lucasfeitozas/kubeforge/internal/api"
 	"github.com/lucasfeitozas/kubeforge/internal/k8s"
 	"github.com/lucasfeitozas/kubeforge/internal/store"
 )
@@ -43,11 +49,11 @@ func main() {
 	}
 	slog.Info("migrations aplicadas com sucesso", "db_path", cfg.dbPath)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	startupCtx, cancelStartup := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelStartup()
 
 	provider := k8s.NewMinikubeProvider(cfg.kubeconfig)
-	clientset, err := provider.GetClientset(ctx, k8s.MinikubeClusterKey)
+	clientset, err := provider.GetClientset(startupCtx, k8s.MinikubeClusterKey)
 	if err != nil {
 		slog.Error("falha ao conectar ao cluster Minikube", "kubeconfig", cfg.kubeconfig, "error", err)
 		os.Exit(1)
@@ -63,6 +69,42 @@ func main() {
 		"kubernetes_version", serverVersion.GitVersion,
 		"platform", serverVersion.Platform,
 	)
+
+	apiServer := api.NewServer(store.NewComponentRepository(db), provider)
+	httpServer := &http.Server{
+		Addr:    fmt.Sprintf(":%d", cfg.httpPort),
+		Handler: apiServer,
+	}
+
+	serveErrCh := make(chan error, 1)
+	go func() {
+		slog.Info("servidor HTTP escutando", "addr", httpServer.Addr)
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErrCh <- err
+			return
+		}
+		serveErrCh <- nil
+	}()
+
+	sigCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+
+	select {
+	case <-sigCtx.Done():
+		slog.Info("sinal de encerramento recebido, desligando servidor HTTP")
+	case err := <-serveErrCh:
+		if err != nil {
+			slog.Error("falha ao iniciar servidor HTTP", "addr", httpServer.Addr, "error", err)
+			os.Exit(1)
+		}
+	}
+
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelShutdown()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		slog.Error("erro ao desligar servidor HTTP", "error", err)
+		os.Exit(1)
+	}
 }
 
 func loadConfig() config {
