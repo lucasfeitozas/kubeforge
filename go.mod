@@ -5,7 +5,9 @@ go 1.23.0
 require (
 	github.com/golang-migrate/migrate/v4 v4.18.3
 	github.com/google/uuid v1.6.0
+	k8s.io/api v0.32.13
 	k8s.io/apiextensions-apiserver v0.32.13
+	k8s.io/apimachinery v0.32.13
 	k8s.io/client-go v0.32.13
 	modernc.org/sqlite v1.39.0
 	sigs.k8s.io/yaml v1.4.0
@@ -51,8 +53,6 @@ require (
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/api v0.32.13 // indirect
-	k8s.io/apimachinery v0.32.13 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20241105132330-32ad38e42d3f // indirect
 	k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738 // indirect
