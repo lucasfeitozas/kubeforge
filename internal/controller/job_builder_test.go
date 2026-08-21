@@ -11,12 +11,21 @@ import (
 
 func newComponent(t *testing.T, runtime, resources string) *store.Component {
 	t.Helper()
-	return &store.Component{
+	return newComponentComHooks(t, runtime, resources, "")
+}
+
+func newComponentComHooks(t *testing.T, runtime, resources, hooks string) *store.Component {
+	t.Helper()
+	component := &store.Component{
 		ID:               "componente-teste",
 		BuildImageDigest: "kubeforge/componente-teste:abc123",
 		Runtime:          json.RawMessage(runtime),
 		Resources:        json.RawMessage(resources),
 	}
+	if hooks != "" {
+		component.Hooks = json.RawMessage(hooks)
+	}
+	return component
 }
 
 func TestBuildJob_CasoCompleto(t *testing.T) {
@@ -148,5 +157,59 @@ func TestBuildJob_ResourcesJSONInvalido(t *testing.T) {
 	_, err := BuildJob(component)
 	if err == nil {
 		t.Fatal("BuildJob deveria retornar erro para resources com JSON inválido")
+	}
+}
+
+func TestBuildJob_PreRunGeraInitContainersNaOrdem(t *testing.T) {
+	hooks := `{
+		"preRun": [
+			{"name": "warmup-check", "image": "curlimages/curl:8.9.0", "command": ["sh", "-c", "curl -f http://dependencia:8080/health"]},
+			{"name": "migra-schema", "image": "org/migrador:latest", "command": ["/migrate.sh"]}
+		]
+	}`
+	component := newComponentComHooks(t, `{"workloadKind": "Job"}`, `{}`, hooks)
+
+	job, err := BuildJob(component)
+	if err != nil {
+		t.Fatalf("BuildJob retornou erro inesperado: %v", err)
+	}
+
+	initContainers := job.Spec.Template.Spec.InitContainers
+	if len(initContainers) != 2 {
+		t.Fatalf("InitContainers tem %d itens, esperava 2", len(initContainers))
+	}
+
+	primeiro := initContainers[0]
+	if primeiro.Name != "warmup-check" || primeiro.Image != "curlimages/curl:8.9.0" {
+		t.Errorf("InitContainers[0] = %+v, esperava name=warmup-check image=curlimages/curl:8.9.0", primeiro)
+	}
+	if len(primeiro.Command) != 3 || primeiro.Command[2] != "curl -f http://dependencia:8080/health" {
+		t.Errorf("InitContainers[0].Command = %v, esperava comando de curl", primeiro.Command)
+	}
+
+	segundo := initContainers[1]
+	if segundo.Name != "migra-schema" || segundo.Image != "org/migrador:latest" {
+		t.Errorf("InitContainers[1] = %+v, esperava name=migra-schema image=org/migrador:latest", segundo)
+	}
+}
+
+func TestBuildJob_SemPreRunNaoGeraInitContainers(t *testing.T) {
+	component := newComponent(t, `{"workloadKind": "Job"}`, `{}`)
+
+	job, err := BuildJob(component)
+	if err != nil {
+		t.Fatalf("BuildJob retornou erro inesperado: %v", err)
+	}
+	if job.Spec.Template.Spec.InitContainers != nil {
+		t.Errorf("InitContainers = %v, esperava nil sem hooks.preRun", job.Spec.Template.Spec.InitContainers)
+	}
+}
+
+func TestBuildJob_HooksJSONInvalido(t *testing.T) {
+	component := newComponentComHooks(t, `{"workloadKind": "Job"}`, `{}`, `{invalido`)
+
+	_, err := BuildJob(component)
+	if err == nil {
+		t.Fatal("BuildJob deveria retornar erro para hooks com JSON inválido")
 	}
 }
