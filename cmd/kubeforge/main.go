@@ -28,6 +28,14 @@ type config struct {
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, nil)))
 
+	if len(os.Args) > 1 && os.Args[1] == "cleanup" {
+		runCleanup(os.Args[2:])
+		return
+	}
+	runServer()
+}
+
+func runServer() {
 	cfg := loadConfig()
 
 	slog.Info("kubeforge iniciado",
@@ -70,7 +78,7 @@ func main() {
 		"platform", serverVersion.Platform,
 	)
 
-	apiServer := api.NewServer(store.NewComponentRepository(db), provider)
+	apiServer := api.NewServer(store.NewComponentRepository(db), provider, store.NewCleanupAuditRepository(db))
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.httpPort),
 		Handler: apiServer,

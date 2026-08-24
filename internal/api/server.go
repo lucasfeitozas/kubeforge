@@ -14,26 +14,35 @@ import (
 )
 
 // Server expõe via HTTP o acompanhamento de status e logs de um Componente
-// em execução (E4.S4) sobre o cluster resolvido por ClusterProvider — a
-// primeira fatia da API descrita em doc.go; CRUD de Componente e as ações
-// build/run/cleanup continuam fora do escopo desta história.
+// em execução (E4.S4), e o cleanup --all (E5.S2) sobre o cluster resolvido
+// por ClusterProvider — a primeira fatia da API descrita em doc.go; CRUD de
+// Componente e a ação build/run continuam fora do escopo desta história.
 type Server struct {
-	mux        *http.ServeMux
-	components store.ComponentRepository
-	clusters   k8s.ClusterProvider
+	mux          *http.ServeMux
+	components   store.ComponentRepository
+	clusters     k8s.ClusterProvider
+	cleanupAudit store.CleanupAuditRepository
 }
 
-// NewServer monta as rotas do Server. components e clusters já devem estar
-// prontos para uso (banco migrado, kubeconfig acessível) — NewServer não
-// valida nenhum dos dois.
-func NewServer(components store.ComponentRepository, clusters k8s.ClusterProvider) *Server {
+// defaultCleanupNamespace é usado quando POST /cleanup não informa
+// ?namespace= — mesmo valor de internal/controller.defaultNamespace, mas
+// mantido como constante própria: cleanup --all é namespace-wide, não
+// associado a um Componente/targetContext.
+const defaultCleanupNamespace = "default"
+
+// NewServer monta as rotas do Server. components, clusters e cleanupAudit já
+// devem estar prontos para uso (banco migrado, kubeconfig acessível) —
+// NewServer não valida nenhum dos três.
+func NewServer(components store.ComponentRepository, clusters k8s.ClusterProvider, cleanupAudit store.CleanupAuditRepository) *Server {
 	s := &Server{
-		mux:        http.NewServeMux(),
-		components: components,
-		clusters:   clusters,
+		mux:          http.NewServeMux(),
+		components:   components,
+		clusters:     clusters,
+		cleanupAudit: cleanupAudit,
 	}
 	s.mux.HandleFunc("GET /components/{id}/status", s.handleStatus)
 	s.mux.HandleFunc("GET /components/{id}/logs", s.handleLogs)
+	s.mux.HandleFunc("POST /cleanup", s.handleCleanup)
 	return s
 }
 
@@ -103,6 +112,48 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		// mais ser alterado nesse ponto, então só registramos o erro.
 		slog.Error("erro ao transmitir logs do componente", "component_id", id, "error", err)
 	}
+}
+
+// cleanupResponse é o corpo JSON devolvido por POST /cleanup.
+type cleanupResponse struct {
+	Removed []cleanupItem `json:"removed"`
+	Count   int           `json:"count"`
+}
+
+type cleanupItem struct {
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+}
+
+// handleCleanup atende POST /cleanup?namespace=N (default
+// defaultCleanupNamespace), removendo todo Job, Pod e PersistentVolumeClaim
+// rotulado kubeforge.io/managed=true no namespace (E5.S2, AC1/AC2) e
+// registrando cada remoção no log de auditoria (AC3). Um erro ao registrar
+// a auditoria é só logado — não deve mascarar o resultado da limpeza em si,
+// que já aconteceu no cluster.
+func (s *Server) handleCleanup(w http.ResponseWriter, r *http.Request) {
+	namespace := r.URL.Query().Get("namespace")
+	if namespace == "" {
+		namespace = defaultCleanupNamespace
+	}
+
+	results, err := controller.RunCleanup(r.Context(), s.clusters, k8s.MinikubeClusterKey, namespace)
+
+	if auditErr := controller.PersistCleanupAudit(r.Context(), s.cleanupAudit, results); auditErr != nil {
+		slog.Error("erro ao registrar auditoria de cleanup", "namespace", namespace, "error", auditErr)
+	}
+
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	items := make([]cleanupItem, len(results))
+	for i, res := range results {
+		items[i] = cleanupItem{Kind: res.Kind, Name: res.Name, Namespace: res.Namespace}
+	}
+	writeJSON(w, http.StatusOK, cleanupResponse{Removed: items, Count: len(items)})
 }
 
 // trackingWriter registra se algum byte já foi efetivamente escrito na
