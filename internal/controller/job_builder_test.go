@@ -160,6 +160,198 @@ func TestBuildJob_ResourcesJSONInvalido(t *testing.T) {
 	}
 }
 
+func TestBuildJob_StorageEphemeralUsaEmptyDirComSizeLimit(t *testing.T) {
+	resources := `{"storage": {"type": "ephemeral", "sizeLimit": "1Gi"}}`
+	component := newComponent(t, `{"workloadKind": "Job"}`, resources)
+
+	job, err := BuildJob(component)
+	if err != nil {
+		t.Fatalf("BuildJob retornou erro inesperado: %v", err)
+	}
+
+	volumes := job.Spec.Template.Spec.Volumes
+	if len(volumes) != 1 {
+		t.Fatalf("Volumes tem %d itens, esperava 1", len(volumes))
+	}
+	if volumes[0].EmptyDir == nil {
+		t.Fatal("Volumes[0].EmptyDir = nil, esperava EmptyDir")
+	}
+	wantSizeLimit := resource.MustParse("1Gi")
+	if volumes[0].EmptyDir.SizeLimit == nil || !volumes[0].EmptyDir.SizeLimit.Equal(wantSizeLimit) {
+		t.Errorf("Volumes[0].EmptyDir.SizeLimit = %v, esperava %v", volumes[0].EmptyDir.SizeLimit, wantSizeLimit)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	if len(container.VolumeMounts) != 1 {
+		t.Fatalf("VolumeMounts tem %d itens, esperava 1", len(container.VolumeMounts))
+	}
+	if container.VolumeMounts[0].Name != "storage" || container.VolumeMounts[0].MountPath != "/data" {
+		t.Errorf("VolumeMounts[0] = %+v, esperava name=storage mountPath=/data", container.VolumeMounts[0])
+	}
+}
+
+func TestBuildJob_StorageEphemeralSemSizeLimit(t *testing.T) {
+	resources := `{"storage": {"type": "ephemeral"}}`
+	component := newComponent(t, `{"workloadKind": "Job"}`, resources)
+
+	job, err := BuildJob(component)
+	if err != nil {
+		t.Fatalf("BuildJob retornou erro inesperado: %v", err)
+	}
+
+	volumes := job.Spec.Template.Spec.Volumes
+	if len(volumes) != 1 || volumes[0].EmptyDir == nil {
+		t.Fatalf("Volumes = %+v, esperava 1 item com EmptyDir", volumes)
+	}
+	if volumes[0].EmptyDir.SizeLimit != nil {
+		t.Errorf("Volumes[0].EmptyDir.SizeLimit = %v, esperava nil sem sizeLimit", volumes[0].EmptyDir.SizeLimit)
+	}
+}
+
+func TestBuildJob_StoragePVCGeraVolumeEVolumeMount(t *testing.T) {
+	resources := `{"storage": {"type": "pvc", "pvc": {"size": "5Gi"}}}`
+	component := newComponent(t, `{"workloadKind": "Job"}`, resources)
+
+	job, err := BuildJob(component)
+	if err != nil {
+		t.Fatalf("BuildJob retornou erro inesperado: %v", err)
+	}
+
+	volumes := job.Spec.Template.Spec.Volumes
+	if len(volumes) != 1 {
+		t.Fatalf("Volumes tem %d itens, esperava 1", len(volumes))
+	}
+	if volumes[0].PersistentVolumeClaim == nil {
+		t.Fatal("Volumes[0].PersistentVolumeClaim = nil, esperava referência ao PVC")
+	}
+	wantClaimName := component.ID + "-data"
+	if volumes[0].PersistentVolumeClaim.ClaimName != wantClaimName {
+		t.Errorf("ClaimName = %q, esperava %q", volumes[0].PersistentVolumeClaim.ClaimName, wantClaimName)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	if len(container.VolumeMounts) != 1 || container.VolumeMounts[0].Name != "storage" {
+		t.Errorf("VolumeMounts = %+v, esperava 1 item com name=storage", container.VolumeMounts)
+	}
+}
+
+func TestBuildJob_SemStorageNaoGeraVolumes(t *testing.T) {
+	component := newComponent(t, `{"workloadKind": "Job"}`, `{}`)
+
+	job, err := BuildJob(component)
+	if err != nil {
+		t.Fatalf("BuildJob retornou erro inesperado: %v", err)
+	}
+	if job.Spec.Template.Spec.Volumes != nil {
+		t.Errorf("Volumes = %v, esperava nil sem resources.storage", job.Spec.Template.Spec.Volumes)
+	}
+	if job.Spec.Template.Spec.Containers[0].VolumeMounts != nil {
+		t.Errorf("VolumeMounts = %v, esperava nil sem resources.storage", job.Spec.Template.Spec.Containers[0].VolumeMounts)
+	}
+}
+
+func TestBuildJob_StorageSizeLimitInvalido(t *testing.T) {
+	resources := `{"storage": {"type": "ephemeral", "sizeLimit": "abc"}}`
+	component := newComponent(t, `{"workloadKind": "Job"}`, resources)
+
+	_, err := BuildJob(component)
+	if err == nil {
+		t.Fatal("BuildJob deveria retornar erro para sizeLimit inválido")
+	}
+}
+
+func TestBuildJob_StoragePVCSizeInvalido(t *testing.T) {
+	resources := `{"storage": {"type": "pvc", "pvc": {"size": "abc"}}}`
+	component := newComponent(t, `{"workloadKind": "Job"}`, resources)
+
+	_, err := BuildJob(component)
+	if err == nil {
+		t.Fatal("BuildJob deveria retornar erro para pvc.size inválido")
+	}
+}
+
+func TestBuildStoragePVC_TypePvcUsaStorageClassPadrao(t *testing.T) {
+	resources := `{"storage": {"type": "pvc", "pvc": {"size": "5Gi"}}}`
+	component := newComponent(t, `{"workloadKind": "Job"}`, resources)
+
+	pvc, err := BuildStoragePVC(component)
+	if err != nil {
+		t.Fatalf("BuildStoragePVC retornou erro inesperado: %v", err)
+	}
+	if pvc == nil {
+		t.Fatal("pvc = nil, esperava PersistentVolumeClaim")
+	}
+	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != "standard" {
+		t.Errorf("StorageClassName = %v, esperava %q (default Minikube)", pvc.Spec.StorageClassName, "standard")
+	}
+}
+
+func TestBuildStoragePVC_StorageClassNameCustomizado(t *testing.T) {
+	resources := `{"storage": {"type": "pvc", "pvc": {"size": "5Gi", "storageClassName": "gp3"}}}`
+	component := newComponent(t, `{"workloadKind": "Job"}`, resources)
+
+	pvc, err := BuildStoragePVC(component)
+	if err != nil {
+		t.Fatalf("BuildStoragePVC retornou erro inesperado: %v", err)
+	}
+	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != "gp3" {
+		t.Errorf("StorageClassName = %v, esperava %q", pvc.Spec.StorageClassName, "gp3")
+	}
+}
+
+func TestBuildStoragePVC_AccessModesPadraoReadWriteOnce(t *testing.T) {
+	resources := `{"storage": {"type": "pvc", "pvc": {"size": "5Gi"}}}`
+	component := newComponent(t, `{"workloadKind": "Job"}`, resources)
+
+	pvc, err := BuildStoragePVC(component)
+	if err != nil {
+		t.Fatalf("BuildStoragePVC retornou erro inesperado: %v", err)
+	}
+	if len(pvc.Spec.AccessModes) != 1 || pvc.Spec.AccessModes[0] != corev1.ReadWriteOnce {
+		t.Errorf("AccessModes = %v, esperava [ReadWriteOnce]", pvc.Spec.AccessModes)
+	}
+
+	wantSize := resource.MustParse("5Gi")
+	got := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
+	if !got.Equal(wantSize) {
+		t.Errorf("Resources.Requests[storage] = %v, esperava %v", got, wantSize)
+	}
+}
+
+func TestBuildStoragePVC_SizeAusenteRetornaErro(t *testing.T) {
+	resources := `{"storage": {"type": "pvc"}}`
+	component := newComponent(t, `{"workloadKind": "Job"}`, resources)
+
+	_, err := BuildStoragePVC(component)
+	if err == nil {
+		t.Fatal("BuildStoragePVC deveria retornar erro quando pvc.size está ausente")
+	}
+}
+
+func TestBuildStoragePVC_TypeEphemeralRetornaNil(t *testing.T) {
+	component := newComponent(t, `{"workloadKind": "Job"}`, `{"storage": {"type": "ephemeral"}}`)
+
+	pvc, err := BuildStoragePVC(component)
+	if err != nil {
+		t.Fatalf("BuildStoragePVC retornou erro inesperado: %v", err)
+	}
+	if pvc != nil {
+		t.Errorf("pvc = %+v, esperava nil para type=ephemeral", pvc)
+	}
+}
+
+func TestBuildStoragePVC_SemStorageRetornaNil(t *testing.T) {
+	component := newComponent(t, `{"workloadKind": "Job"}`, `{}`)
+
+	pvc, err := BuildStoragePVC(component)
+	if err != nil {
+		t.Fatalf("BuildStoragePVC retornou erro inesperado: %v", err)
+	}
+	if pvc != nil {
+		t.Errorf("pvc = %+v, esperava nil sem resources.storage", pvc)
+	}
+}
+
 func TestBuildJob_PreRunGeraInitContainersNaOrdem(t *testing.T) {
 	hooks := `{
 		"preRun": [

@@ -154,8 +154,8 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E4.S5 — Suporte a armazenamento efêmero e PVC
 **Como** usuário, **quero** que `resources.storage` (ephemeral ou pvc) seja aplicado ao manifesto, **para** testar comportamentos que dependem de armazenamento.
 - Critérios de aceite:
-  - [ ] `type: ephemeral` usa `emptyDir` com `sizeLimit`
-  - [ ] `type: pvc` cria/reaproveita um `PersistentVolumeClaim` com a `storageClassName` padrão do Minikube
+  - [x] `type: ephemeral` usa `emptyDir` com `sizeLimit`
+  - [x] `type: pvc` cria/reaproveita um `PersistentVolumeClaim` com a `storageClassName` padrão do Minikube
 - Prioridade: baixa
 
 ---

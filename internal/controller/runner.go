@@ -11,6 +11,7 @@ import (
 	"github.com/lucasfeitozas/kubeforge/internal/store"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
@@ -89,6 +90,19 @@ func (r *Runner) Run(ctx context.Context, component *store.Component) error {
 	if err != nil {
 		return r.fail(ctx, component.ID, execution.ID, component.BuildImageDigest, startedAt,
 			fmt.Errorf("obtendo clientset do cluster %q: %w", tc.Cluster, err))
+	}
+
+	storagePVC, err := BuildStoragePVC(component)
+	if err != nil {
+		return r.fail(ctx, component.ID, execution.ID, component.BuildImageDigest, startedAt,
+			fmt.Errorf("montando PersistentVolumeClaim do componente %q: %w", component.ID, err))
+	}
+	if storagePVC != nil {
+		storagePVC.Namespace = tc.Namespace
+		if err := r.ensurePVC(ctx, clientset, tc.Namespace, storagePVC); err != nil {
+			return r.fail(ctx, component.ID, execution.ID, component.BuildImageDigest, startedAt,
+				fmt.Errorf("garantindo PersistentVolumeClaim do componente %q: %w", component.ID, err))
+		}
 	}
 
 	mainJob, err := BuildJob(component)
@@ -197,6 +211,25 @@ func (r *Runner) applyAndWait(ctx context.Context, clientset kubernetes.Interfac
 			}
 		}
 	}
+}
+
+// ensurePVC garante que o PersistentVolumeClaim gerado por BuildStoragePVC
+// exista no cluster antes do Job principal ser aplicado (E4.S5, AC2): se já
+// existir, reaproveita sem alterá-lo; caso contrário, cria. namespace já
+// preenchido pelo chamador, igual applyAndWait.
+func (r *Runner) ensurePVC(ctx context.Context, clientset kubernetes.Interface, namespace string, pvc *corev1.PersistentVolumeClaim) error {
+	_, err := clientset.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, pvc.Name, metav1.GetOptions{})
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("consultando PersistentVolumeClaim %q no namespace %q: %w", pvc.Name, namespace, err)
+	}
+
+	if _, err := clientset.CoreV1().PersistentVolumeClaims(namespace).Create(ctx, pvc, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("criando PersistentVolumeClaim %q no namespace %q: %w", pvc.Name, namespace, err)
+	}
+	return nil
 }
 
 // jobTerminalPhase inspeciona status.conditions do Job em busca de uma
