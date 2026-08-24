@@ -173,9 +173,9 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E5.S2 — Comando/endpoint `cleanup --all`
 **Como** usuário, **quero** um comando único que remova todos os recursos com label `kubeforge.io/managed=true` no namespace, **para** liberar CPU/memória do meu laptop quando quiser.
 - Critérios de aceite:
-  - [ ] CLI: `kubeforge cleanup --all` remove Jobs, Pods e PVCs órfãos
-  - [ ] Endpoint equivalente exposto para o Console Web
-  - [ ] Log de auditoria simples (o que foi removido e quando)
+  - [x] CLI: `kubeforge cleanup --all` remove Jobs, Pods e PVCs órfãos
+  - [x] Endpoint equivalente exposto para o Console Web
+  - [x] Log de auditoria simples (o que foi removido e quando)
 - Prioridade: média
 
 ### E5.S3 — Labels padronizadas em todo recurso criado

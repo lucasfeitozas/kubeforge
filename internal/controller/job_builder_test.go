@@ -359,6 +359,24 @@ func TestBuildStoragePVC_SemStorageRetornaNil(t *testing.T) {
 	}
 }
 
+func TestBuildStoragePVC_AplicaLabelsManaged(t *testing.T) {
+	resources := `{"storage": {"type": "pvc", "pvc": {"size": "5Gi"}}}`
+	component := newComponent(t, `{"workloadKind": "Job"}`, resources)
+
+	pvc, err := BuildStoragePVC(component)
+	if err != nil {
+		t.Fatalf("BuildStoragePVC retornou erro inesperado: %v", err)
+	}
+	if pvc == nil {
+		t.Fatal("pvc = nil, esperava PersistentVolumeClaim")
+	}
+
+	wantLabels := map[string]string{"kubeforge.io/managed": "true", "kubeforge.io/component": component.ID}
+	if !mapsEqual(pvc.Labels, wantLabels) {
+		t.Errorf("pvc.Labels = %v, esperava %v", pvc.Labels, wantLabels)
+	}
+}
+
 func TestBuildJob_PreRunGeraInitContainersNaOrdem(t *testing.T) {
 	hooks := `{
 		"preRun": [
@@ -450,6 +468,35 @@ func TestBuildJob_LifecycleJSONInvalido(t *testing.T) {
 	if err == nil {
 		t.Fatal("BuildJob deveria retornar erro para lifecycle com JSON inválido")
 	}
+}
+
+func TestBuildJob_AplicaLabelsManaged(t *testing.T) {
+	component := newComponent(t, `{"workloadKind": "Job"}`, `{}`)
+
+	job, err := BuildJob(component)
+	if err != nil {
+		t.Fatalf("BuildJob retornou erro inesperado: %v", err)
+	}
+
+	wantLabels := map[string]string{"kubeforge.io/managed": "true", "kubeforge.io/component": component.ID}
+	if !mapsEqual(job.Labels, wantLabels) {
+		t.Errorf("job.Labels = %v, esperava %v", job.Labels, wantLabels)
+	}
+	if !mapsEqual(job.Spec.Template.Labels, wantLabels) {
+		t.Errorf("job.Spec.Template.Labels = %v, esperava %v", job.Spec.Template.Labels, wantLabels)
+	}
+}
+
+func mapsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 func TestBuildPostRunJob_CasoCompleto(t *testing.T) {
@@ -561,6 +608,24 @@ func TestBuildPostRunJob_LifecycleOverride(t *testing.T) {
 	}
 	if plan.Job.Spec.ActiveDeadlineSeconds == nil || *plan.Job.Spec.ActiveDeadlineSeconds != 120 {
 		t.Errorf("ActiveDeadlineSeconds = %v, esperava 120", plan.Job.Spec.ActiveDeadlineSeconds)
+	}
+}
+
+func TestBuildPostRunJob_AplicaLabelsManaged(t *testing.T) {
+	hooks := `{"postRun": [{"name": "verifica", "image": "curlimages/curl:8.9.0", "command": ["true"]}]}`
+	component := newComponentComHooks(t, `{"workloadKind": "Job"}`, `{}`, hooks)
+
+	plan, err := BuildPostRunJob(component)
+	if err != nil {
+		t.Fatalf("BuildPostRunJob retornou erro inesperado: %v", err)
+	}
+
+	wantLabels := map[string]string{"kubeforge.io/managed": "true", "kubeforge.io/component": component.ID}
+	if !mapsEqual(plan.Job.Labels, wantLabels) {
+		t.Errorf("plan.Job.Labels = %v, esperava %v", plan.Job.Labels, wantLabels)
+	}
+	if !mapsEqual(plan.Job.Spec.Template.Labels, wantLabels) {
+		t.Errorf("plan.Job.Spec.Template.Labels = %v, esperava %v", plan.Job.Spec.Template.Labels, wantLabels)
 	}
 }
 

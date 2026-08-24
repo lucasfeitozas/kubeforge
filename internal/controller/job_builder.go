@@ -182,13 +182,17 @@ func BuildJob(component *store.Component) (*batchv1.Job, error) {
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: component.ID,
+			Name:   component.ID,
+			Labels: managedLabels(component.ID),
 		},
 		Spec: batchv1.JobSpec{
 			BackoffLimit:            &backoffLimit,
 			TTLSecondsAfterFinished: ttlSecondsAfterFinished,
 			ActiveDeadlineSeconds:   activeDeadlineSeconds,
 			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: managedLabels(component.ID),
+				},
 				Spec: podSpec,
 			},
 		},
@@ -246,6 +250,23 @@ const storageMountPath = "/data"
 // (docs/ARCHITECTURE.md §4.2, clusterProfiles.minikube.defaultStorageClass) —
 // único cluster suportado hoje por internal/k8s.ClusterProvider.
 const defaultStorageClassName = "standard"
+
+// managedLabelKey/managedLabelValue/componentLabelKey rotulam todo recurso
+// criado pelo Controller (Jobs, Pods via template, PVCs), viabilizando
+// remoção seletiva por `kubeforge cleanup --all` (E5.S2/E5.S3, ver
+// internal/controller/cleanup.go).
+const managedLabelKey = "kubeforge.io/managed"
+const managedLabelValue = "true"
+const componentLabelKey = "kubeforge.io/component"
+
+// managedLabels monta o conjunto de labels aplicado a Jobs, Pod templates e
+// PVCs de um Componente.
+func managedLabels(componentID string) map[string]string {
+	return map[string]string{
+		managedLabelKey:   managedLabelValue,
+		componentLabelKey: componentID,
+	}
+}
 
 // defaultTTLSecondsAfterFinished e defaultActiveDeadlineSeconds são usados
 // quando spec.lifecycle não informa os campos correspondentes (E5.S1) —
@@ -332,7 +353,8 @@ func buildStoragePVC(componentID string, pvc *jobPvcBlock) (*corev1.PersistentVo
 
 	return &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: componentID + storagePVCSuffix,
+			Name:   componentID + storagePVCSuffix,
+			Labels: managedLabels(componentID),
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes:      accessModes,
@@ -414,13 +436,17 @@ func BuildPostRunJob(component *store.Component) (*PostRunPlan, error) {
 	backoffLimit := int32(0)
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: component.ID + postRunJobSuffix,
+			Name:   component.ID + postRunJobSuffix,
+			Labels: managedLabels(component.ID),
 		},
 		Spec: batchv1.JobSpec{
 			BackoffLimit:            &backoffLimit,
 			TTLSecondsAfterFinished: ttlSecondsAfterFinished,
 			ActiveDeadlineSeconds:   activeDeadlineSeconds,
 			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: managedLabels(component.ID),
+				},
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyNever,
 					Containers:    toPostRunContainers(hooks.PostRun),

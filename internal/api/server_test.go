@@ -39,7 +39,7 @@ func newTestServer(t *testing.T, clientset kubernetes.Interface) (*Server, store
 	}
 
 	components := store.NewComponentRepository(db)
-	server := NewServer(components, stubClusterProvider{clientset: clientset})
+	server := NewServer(components, stubClusterProvider{clientset: clientset}, store.NewCleanupAuditRepository(db))
 	return server, components
 }
 
@@ -161,6 +161,78 @@ func TestHandleLogs_TailLinesInvalido(t *testing.T) {
 	}
 }
 
+func newManagedJob(name, namespace string) *batchv1.Job {
+	return &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels:    map[string]string{"kubeforge.io/managed": "true", "kubeforge.io/component": name},
+		},
+	}
+}
+
+func TestHandleCleanup_RemoveRecursosRotulados(t *testing.T) {
+	job := newManagedJob("componente-a", "default")
+	server, _ := newTestServer(t, fake.NewSimpleClientset(job))
+
+	req := httptest.NewRequest(http.MethodPost, "/cleanup", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, corpo = %q, esperava 200", rec.Code, rec.Body.String())
+	}
+	var got cleanupResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("Unmarshal() error = %v, corpo = %q", err, rec.Body.String())
+	}
+	if got.Count != 1 || len(got.Removed) != 1 {
+		t.Fatalf("cleanupResponse = %+v, esperava 1 recurso removido", got)
+	}
+	if got.Removed[0].Kind != "Job" || got.Removed[0].Name != "componente-a" || got.Removed[0].Namespace != "default" {
+		t.Errorf("Removed[0] = %+v, esperava Kind=Job Name=componente-a Namespace=default", got.Removed[0])
+	}
+}
+
+func TestHandleCleanup_NamespacePersonalizado(t *testing.T) {
+	job := newManagedJob("componente-b", "kubeforge-workloads")
+	server, _ := newTestServer(t, fake.NewSimpleClientset(job))
+
+	req := httptest.NewRequest(http.MethodPost, "/cleanup?namespace=kubeforge-workloads", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, corpo = %q, esperava 200", rec.Code, rec.Body.String())
+	}
+	var got cleanupResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("Unmarshal() error = %v, corpo = %q", err, rec.Body.String())
+	}
+	if got.Count != 1 || got.Removed[0].Namespace != "kubeforge-workloads" {
+		t.Fatalf("cleanupResponse = %+v, esperava 1 recurso removido em kubeforge-workloads", got)
+	}
+}
+
+func TestHandleCleanup_SemRecursosRotuladosDevolveListaVazia(t *testing.T) {
+	server, _ := newTestServer(t, fake.NewSimpleClientset())
+
+	req := httptest.NewRequest(http.MethodPost, "/cleanup", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, corpo = %q, esperava 200", rec.Code, rec.Body.String())
+	}
+	var got cleanupResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("Unmarshal() error = %v, corpo = %q", err, rec.Body.String())
+	}
+	if got.Count != 0 || len(got.Removed) != 0 {
+		t.Fatalf("cleanupResponse = %+v, esperava lista vazia", got)
+	}
+}
+
 func TestHandleLogs_Follow_StreamAteHttptestServer(t *testing.T) {
 	db, err := store.Open(":memory:")
 	if err != nil {
@@ -176,7 +248,7 @@ func TestHandleLogs_Follow_StreamAteHttptestServer(t *testing.T) {
 	pod := newJobPod(component.ID+"-aaa", "default", component.ID, corev1.PodRunning)
 	clientset := fake.NewSimpleClientset(pod)
 
-	server := NewServer(components, stubClusterProvider{clientset: clientset})
+	server := NewServer(components, stubClusterProvider{clientset: clientset}, store.NewCleanupAuditRepository(db))
 	httpSrv := httptest.NewServer(server)
 	t.Cleanup(httpSrv.Close)
 
