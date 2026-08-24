@@ -143,6 +143,7 @@ spec:
             name: teste-secret
             key: token
     restartPolicy: Never        # aplicável a Pod/Job
+    backoffLimit: 0              # aplicável a Job
 
   hooks:
     preRun:
@@ -234,7 +235,8 @@ status:
         "env": { "type": "array" },
         "args": { "type": "array" },
         "command": { "type": "array" },
-        "logLevel": { "type": "string" }
+        "logLevel": { "type": "string" },
+        "backoffLimit": { "type": "integer" }
       }
     },
     "hooks": {

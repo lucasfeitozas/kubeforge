@@ -125,37 +125,37 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E4.S1 — Mapeamento Componente → manifesto Job
 **Como** sistema, **quero** gerar um `batch/v1 Job` a partir de `spec.runtime` + `spec.resources`, **para** executar o Componente como workload de teste.
 - Critérios de aceite:
-  - [ ] `imagePullPolicy: Never` fixado (imagem já está no daemon do Minikube)
-  - [ ] `resources.requests/limits`, `env`, `command`, `args` mapeados corretamente
-  - [ ] `restartPolicy` e `backoffLimit` aplicados conforme spec
+  - [x] `imagePullPolicy: Never` fixado (imagem já está no daemon do Minikube)
+  - [x] `resources.requests/limits`, `env`, `command`, `args` mapeados corretamente
+  - [x] `restartPolicy` e `backoffLimit` aplicados conforme spec
 - Prioridade: alta
 
 ### E4.S2 — Suporte a Init Containers (hooks `preRun`)
 **Como** usuário, **quero** que `spec.hooks.preRun` seja traduzido em Init Containers do Job, **para** validar pré-condições antes da execução principal.
 - Critérios de aceite:
-  - [ ] Cada item de `preRun` vira um Init Container na ordem declarada
-  - [ ] Falha de um Init Container impede o container principal de rodar (comportamento nativo do K8s)
+  - [x] Cada item de `preRun` vira um Init Container na ordem declarada
+  - [x] Falha de um Init Container impede o container principal de rodar (comportamento nativo do K8s)
 - Prioridade: média
 
 ### E4.S3 — Hooks `postRun` como Job separado
 **Como** usuário, **quero** que `spec.hooks.postRun` seja executado como um Job independente após o término do Job principal, **para** rodar verificações sem acoplar ao container original.
 - Critérios de aceite:
-  - [ ] Controller observa `phase: Succeeded/Failed` do Job principal e dispara o Job de verificação
-  - [ ] `continueOnError: false` interrompe o fluxo e marca a execução como `Failed`
+  - [x] Controller observa `phase: Succeeded/Failed` do Job principal e dispara o Job de verificação
+  - [x] `continueOnError: false` interrompe o fluxo e marca a execução como `Failed`
 - Prioridade: média
 
 ### E4.S4 — Acompanhamento de status e logs
 **Como** usuário, **quero** consultar o status (`Pending/Running/Succeeded/Failed`) e os logs do Pod em execução, **para** acompanhar o teste sem usar `kubectl` diretamente.
 - Critérios de aceite:
-  - [ ] Endpoint/consulta que reflete o status atual do Job/Pod
-  - [ ] Stream ou tail de logs disponível via API
+  - [x] Endpoint/consulta que reflete o status atual do Job/Pod
+  - [x] Stream ou tail de logs disponível via API
 - Prioridade: alta
 
 ### E4.S5 — Suporte a armazenamento efêmero e PVC
 **Como** usuário, **quero** que `resources.storage` (ephemeral ou pvc) seja aplicado ao manifesto, **para** testar comportamentos que dependem de armazenamento.
 - Critérios de aceite:
-  - [ ] `type: ephemeral` usa `emptyDir` com `sizeLimit`
-  - [ ] `type: pvc` cria/reaproveita um `PersistentVolumeClaim` com a `storageClassName` padrão do Minikube
+  - [x] `type: ephemeral` usa `emptyDir` com `sizeLimit`
+  - [x] `type: pvc` cria/reaproveita um `PersistentVolumeClaim` com a `storageClassName` padrão do Minikube
 - Prioridade: baixa
 
 ---

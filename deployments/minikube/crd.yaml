@@ -102,6 +102,9 @@ spec:
                         x-kubernetes-preserve-unknown-fields: true
                     restartPolicy:
                       type: string
+                    backoffLimit:
+                      type: integer
+                      default: 0
                 hooks:
                   type: object
                   properties:
