@@ -28,6 +28,13 @@ func newComponentComHooks(t *testing.T, runtime, resources, hooks string) *store
 	return component
 }
 
+func newComponentComLifecycle(t *testing.T, runtime, resources, lifecycle string) *store.Component {
+	t.Helper()
+	component := newComponent(t, runtime, resources)
+	component.Lifecycle = json.RawMessage(lifecycle)
+	return component
+}
+
 func TestBuildJob_CasoCompleto(t *testing.T) {
 	runtime := `{
 		"workloadKind": "Job",
@@ -406,6 +413,45 @@ func TestBuildJob_HooksJSONInvalido(t *testing.T) {
 	}
 }
 
+func TestBuildJob_LifecycleDefaults(t *testing.T) {
+	component := newComponent(t, `{"workloadKind": "Job"}`, `{}`)
+
+	job, err := BuildJob(component)
+	if err != nil {
+		t.Fatalf("BuildJob retornou erro inesperado: %v", err)
+	}
+	if job.Spec.TTLSecondsAfterFinished == nil || *job.Spec.TTLSecondsAfterFinished != 3600 {
+		t.Errorf("TTLSecondsAfterFinished = %v, esperava 3600", job.Spec.TTLSecondsAfterFinished)
+	}
+	if job.Spec.ActiveDeadlineSeconds == nil || *job.Spec.ActiveDeadlineSeconds != 1800 {
+		t.Errorf("ActiveDeadlineSeconds = %v, esperava 1800", job.Spec.ActiveDeadlineSeconds)
+	}
+}
+
+func TestBuildJob_LifecycleOverride(t *testing.T) {
+	component := newComponentComLifecycle(t, `{"workloadKind": "Job"}`, `{}`, `{"ttlSecondsAfterFinished": 60, "activeDeadlineSeconds": 120}`)
+
+	job, err := BuildJob(component)
+	if err != nil {
+		t.Fatalf("BuildJob retornou erro inesperado: %v", err)
+	}
+	if job.Spec.TTLSecondsAfterFinished == nil || *job.Spec.TTLSecondsAfterFinished != 60 {
+		t.Errorf("TTLSecondsAfterFinished = %v, esperava 60", job.Spec.TTLSecondsAfterFinished)
+	}
+	if job.Spec.ActiveDeadlineSeconds == nil || *job.Spec.ActiveDeadlineSeconds != 120 {
+		t.Errorf("ActiveDeadlineSeconds = %v, esperava 120", job.Spec.ActiveDeadlineSeconds)
+	}
+}
+
+func TestBuildJob_LifecycleJSONInvalido(t *testing.T) {
+	component := newComponentComLifecycle(t, `{"workloadKind": "Job"}`, `{}`, `{invalido`)
+
+	_, err := BuildJob(component)
+	if err == nil {
+		t.Fatal("BuildJob deveria retornar erro para lifecycle com JSON inválido")
+	}
+}
+
 func TestBuildPostRunJob_CasoCompleto(t *testing.T) {
 	hooks := `{
 		"postRun": [
@@ -482,6 +528,39 @@ func TestBuildPostRunJob_HooksJSONInvalido(t *testing.T) {
 	_, err := BuildPostRunJob(component)
 	if err == nil {
 		t.Fatal("BuildPostRunJob deveria retornar erro para hooks com JSON inválido")
+	}
+}
+
+func TestBuildPostRunJob_LifecycleDefaults(t *testing.T) {
+	hooks := `{"postRun": [{"name": "verifica", "image": "curlimages/curl:8.9.0", "command": ["true"]}]}`
+	component := newComponentComHooks(t, `{"workloadKind": "Job"}`, `{}`, hooks)
+
+	plan, err := BuildPostRunJob(component)
+	if err != nil {
+		t.Fatalf("BuildPostRunJob retornou erro inesperado: %v", err)
+	}
+	if plan.Job.Spec.TTLSecondsAfterFinished == nil || *plan.Job.Spec.TTLSecondsAfterFinished != 3600 {
+		t.Errorf("TTLSecondsAfterFinished = %v, esperava 3600", plan.Job.Spec.TTLSecondsAfterFinished)
+	}
+	if plan.Job.Spec.ActiveDeadlineSeconds == nil || *plan.Job.Spec.ActiveDeadlineSeconds != 1800 {
+		t.Errorf("ActiveDeadlineSeconds = %v, esperava 1800", plan.Job.Spec.ActiveDeadlineSeconds)
+	}
+}
+
+func TestBuildPostRunJob_LifecycleOverride(t *testing.T) {
+	hooks := `{"postRun": [{"name": "verifica", "image": "curlimages/curl:8.9.0", "command": ["true"]}]}`
+	component := newComponentComHooks(t, `{"workloadKind": "Job"}`, `{}`, hooks)
+	component.Lifecycle = json.RawMessage(`{"ttlSecondsAfterFinished": 60, "activeDeadlineSeconds": 120}`)
+
+	plan, err := BuildPostRunJob(component)
+	if err != nil {
+		t.Fatalf("BuildPostRunJob retornou erro inesperado: %v", err)
+	}
+	if plan.Job.Spec.TTLSecondsAfterFinished == nil || *plan.Job.Spec.TTLSecondsAfterFinished != 60 {
+		t.Errorf("TTLSecondsAfterFinished = %v, esperava 60", plan.Job.Spec.TTLSecondsAfterFinished)
+	}
+	if plan.Job.Spec.ActiveDeadlineSeconds == nil || *plan.Job.Spec.ActiveDeadlineSeconds != 120 {
+		t.Errorf("ActiveDeadlineSeconds = %v, esperava 120", plan.Job.Spec.ActiveDeadlineSeconds)
 	}
 }
 

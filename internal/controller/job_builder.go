@@ -92,6 +92,16 @@ type jobPostRunItemBlock struct {
 	ContinueOnError bool     `json:"continueOnError"`
 }
 
+// jobLifecycleBlock espelha os campos de spec.lifecycle usados para
+// configurar limpeza nativa do Job (E5.S1, deployments/minikube/crd.yaml).
+// cleanupPolicy não é lido aqui: já é validado por
+// internal/store/component_validation.go e pertence a uma história futura
+// (E5.S2/S3, reconciliação ativa pelo Controller).
+type jobLifecycleBlock struct {
+	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished"`
+	ActiveDeadlineSeconds   *int64 `json:"activeDeadlineSeconds"`
+}
+
 // BuildJob gera o manifesto batch/v1 Job de um Componente a partir de
 // spec.runtime + spec.resources (E4.S1), para executá-lo como workload de
 // teste. BuildJob não aplica o Job no cluster nem decide seu namespace: essas
@@ -135,6 +145,11 @@ func BuildJob(component *store.Component) (*batchv1.Job, error) {
 		return nil, fmt.Errorf("interpretando resources.storage do componente %q: %w", component.ID, err)
 	}
 
+	ttlSecondsAfterFinished, activeDeadlineSeconds, err := parseJobLifecycle(component)
+	if err != nil {
+		return nil, err
+	}
+
 	backoffLimit := int32(0)
 	if rt.BackoffLimit != nil {
 		backoffLimit = *rt.BackoffLimit
@@ -170,7 +185,9 @@ func BuildJob(component *store.Component) (*batchv1.Job, error) {
 			Name: component.ID,
 		},
 		Spec: batchv1.JobSpec{
-			BackoffLimit: &backoffLimit,
+			BackoffLimit:            &backoffLimit,
+			TTLSecondsAfterFinished: ttlSecondsAfterFinished,
+			ActiveDeadlineSeconds:   activeDeadlineSeconds,
 			Template: corev1.PodTemplateSpec{
 				Spec: podSpec,
 			},
@@ -192,6 +209,27 @@ func parseJobResources(component *store.Component) (jobResourcesBlock, error) {
 	return res, nil
 }
 
+// parseJobLifecycle interpreta component.Lifecycle e resolve
+// ttlSecondsAfterFinished/activeDeadlineSeconds, aplicando os defaults do
+// CRD quando o campo está ausente (E5.S1).
+func parseJobLifecycle(component *store.Component) (ttl *int32, deadline *int64, err error) {
+	var lc jobLifecycleBlock
+	if len(component.Lifecycle) > 0 {
+		if err := json.Unmarshal(component.Lifecycle, &lc); err != nil {
+			return nil, nil, fmt.Errorf("interpretando lifecycle do componente %q: %w", component.ID, err)
+		}
+	}
+	ttlValue := defaultTTLSecondsAfterFinished
+	if lc.TTLSecondsAfterFinished != nil {
+		ttlValue = *lc.TTLSecondsAfterFinished
+	}
+	deadlineValue := defaultActiveDeadlineSeconds
+	if lc.ActiveDeadlineSeconds != nil {
+		deadlineValue = *lc.ActiveDeadlineSeconds
+	}
+	return &ttlValue, &deadlineValue, nil
+}
+
 // storageVolumeName é o nome do único Volume anexado ao container "main"
 // quando resources.storage está definido (E4.S5) — só existe um container
 // no Job principal, então não há necessidade de nomes distintos por volume.
@@ -208,6 +246,12 @@ const storageMountPath = "/data"
 // (docs/ARCHITECTURE.md §4.2, clusterProfiles.minikube.defaultStorageClass) —
 // único cluster suportado hoje por internal/k8s.ClusterProvider.
 const defaultStorageClassName = "standard"
+
+// defaultTTLSecondsAfterFinished e defaultActiveDeadlineSeconds são usados
+// quando spec.lifecycle não informa os campos correspondentes (E5.S1) —
+// mesmos valores default documentados em deployments/minikube/crd.yaml.
+const defaultTTLSecondsAfterFinished int32 = 3600
+const defaultActiveDeadlineSeconds int64 = 1800
 
 // storagePVCSuffix separa o nome do PersistentVolumeClaim do nome do Job
 // principal (que usa component.ID puro, ver BuildJob), análogo a
@@ -362,13 +406,20 @@ func BuildPostRunJob(component *store.Component) (*PostRunPlan, error) {
 		return &PostRunPlan{}, nil
 	}
 
+	ttlSecondsAfterFinished, activeDeadlineSeconds, err := parseJobLifecycle(component)
+	if err != nil {
+		return nil, err
+	}
+
 	backoffLimit := int32(0)
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: component.ID + postRunJobSuffix,
 		},
 		Spec: batchv1.JobSpec{
-			BackoffLimit: &backoffLimit,
+			BackoffLimit:            &backoffLimit,
+			TTLSecondsAfterFinished: ttlSecondsAfterFinished,
+			ActiveDeadlineSeconds:   activeDeadlineSeconds,
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyNever,

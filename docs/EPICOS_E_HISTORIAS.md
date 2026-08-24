@@ -167,7 +167,7 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E5.S1 — TTL nativo aplicado automaticamente
 **Como** sistema, **quero** aplicar `ttlSecondsAfterFinished` e `activeDeadlineSeconds` em todo Job criado, **para** que o próprio Kubernetes limpe recursos concluídos ou travados.
 - Critérios de aceite:
-  - [ ] Valores default aplicados se `spec.lifecycle` não informar (`ttlSecondsAfterFinished: 3600`, `activeDeadlineSeconds: 1800`)
+  - [x] Valores default aplicados se `spec.lifecycle` não informar (`ttlSecondsAfterFinished: 3600`, `activeDeadlineSeconds: 1800`)
 - Prioridade: alta
 
 ### E5.S2 — Comando/endpoint `cleanup --all`
