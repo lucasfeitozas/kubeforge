@@ -167,21 +167,21 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E5.S1 — TTL nativo aplicado automaticamente
 **Como** sistema, **quero** aplicar `ttlSecondsAfterFinished` e `activeDeadlineSeconds` em todo Job criado, **para** que o próprio Kubernetes limpe recursos concluídos ou travados.
 - Critérios de aceite:
-  - [ ] Valores default aplicados se `spec.lifecycle` não informar (`ttlSecondsAfterFinished: 3600`, `activeDeadlineSeconds: 1800`)
+  - [x] Valores default aplicados se `spec.lifecycle` não informar (`ttlSecondsAfterFinished: 3600`, `activeDeadlineSeconds: 1800`)
 - Prioridade: alta
 
 ### E5.S2 — Comando/endpoint `cleanup --all`
 **Como** usuário, **quero** um comando único que remova todos os recursos com label `kubeforge.io/managed=true` no namespace, **para** liberar CPU/memória do meu laptop quando quiser.
 - Critérios de aceite:
-  - [ ] CLI: `kubeforge cleanup --all` remove Jobs, Pods e PVCs órfãos
-  - [ ] Endpoint equivalente exposto para o Console Web
-  - [ ] Log de auditoria simples (o que foi removido e quando)
+  - [x] CLI: `kubeforge cleanup --all` remove Jobs, Pods e PVCs órfãos
+  - [x] Endpoint equivalente exposto para o Console Web
+  - [x] Log de auditoria simples (o que foi removido e quando)
 - Prioridade: média
 
 ### E5.S3 — Labels padronizadas em todo recurso criado
-**Como** sistema, **quero** que todo recurso criado pelo Controller receba `kubeforge.io/managed=true` e `kubeforge.io/component=<nome>`, **para** viabilizar o cleanup seletivo.
+**Como** sistema, **quero** que todo recurso criado pelo Controller receba `kubeforge.io/managed=true` e `kubeforge.io/component=<id>`, **para** viabilizar o cleanup seletivo.
 - Critérios de aceite:
-  - [ ] Labels aplicadas em Jobs, Pods (via template), PVCs e ConfigMaps criados pelo Controller
+  - [x] Labels aplicadas em Jobs, Pods (via template), PVCs e ConfigMaps criados pelo Controller (`managedLabels` em `internal/controller/job_builder.go`, implementado como pré-requisito da E5.S2/GH-19 — ver ADR 0011; ConfigMaps não se aplicam hoje, nenhum é criado pelo projeto — ver ADR 0012)
 - Prioridade: alta
 
 ---
