@@ -309,6 +309,128 @@ func TestRunner_ErroDeCluster(t *testing.T) {
 	}
 }
 
+func newRunnerTestComponentComStorage(t *testing.T, components store.ComponentRepository, storageJSON string) *store.Component {
+	t.Helper()
+	ctx := context.Background()
+
+	c := &store.Component{
+		Nome:          "componente-de-teste",
+		Source:        json.RawMessage(`{"repoUrl":"https://example.com/repo.git","ref":{"type":"branch","value":"main"}}`),
+		Resources:     json.RawMessage(`{"requests":{"cpu":"100m"},"storage":` + storageJSON + `}`),
+		Runtime:       json.RawMessage(`{"workloadKind":"Job"}`),
+		TargetContext: json.RawMessage(`{"cluster":"minikube"}`),
+	}
+	if err := components.Create(ctx, c); err != nil {
+		t.Fatalf("criando componente de teste: %v", err)
+	}
+	if err := components.UpdateBuildStatus(ctx, c.ID, store.PhaseBuilt, "sha256:fakedigest", ""); err != nil {
+		t.Fatalf("marcando componente de teste como Built: %v", err)
+	}
+	c.BuildImageDigest = "sha256:fakedigest"
+	return c
+}
+
+func countCreateActionsFor(clientset *fake.Clientset, resource string) int {
+	n := 0
+	for _, action := range clientset.Actions() {
+		if action.GetVerb() == "create" && action.GetResource().Resource == resource {
+			n++
+		}
+	}
+	return n
+}
+
+func TestRunner_StoragePVCCriadoQuandoAusente(t *testing.T) {
+	components, executions := newRunnerTestDB(t)
+	component := newRunnerTestComponentComStorage(t, components, `{"type":"pvc","pvc":{"size":"5Gi"}}`)
+
+	clientset := fake.NewSimpleClientset()
+	clientset.PrependReactor("create", "jobs", newJobConditionReactor(map[string]batchv1.JobCondition{
+		component.ID: completeCondition(),
+	}))
+
+	runner := &Runner{
+		ClusterProvider: stubClusterProvider{clientset: clientset},
+		Components:      components,
+		Executions:      executions,
+		PollInterval:    time.Millisecond,
+	}
+
+	if err := runner.Run(context.Background(), component); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	wantName := component.ID + "-data"
+	pvc, err := clientset.CoreV1().PersistentVolumeClaims("default").Get(context.Background(), wantName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("PersistentVolumeClaim %q não encontrado: %v", wantName, err)
+	}
+	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != "standard" {
+		t.Errorf("StorageClassName = %v, esperava %q", pvc.Spec.StorageClassName, "standard")
+	}
+	if n := countCreateActionsFor(clientset, "persistentvolumeclaims"); n != 1 {
+		t.Errorf("countCreateActionsFor(persistentvolumeclaims) = %d, esperava 1", n)
+	}
+}
+
+func TestRunner_StoragePVCReaproveitaExistente(t *testing.T) {
+	components, executions := newRunnerTestDB(t)
+	component := newRunnerTestComponentComStorage(t, components, `{"type":"pvc","pvc":{"size":"5Gi"}}`)
+
+	existingPVC := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: component.ID + "-data", Namespace: "default"},
+	}
+	clientset := fake.NewSimpleClientset(existingPVC)
+	clientset.PrependReactor("create", "jobs", newJobConditionReactor(map[string]batchv1.JobCondition{
+		component.ID: completeCondition(),
+	}))
+
+	runner := &Runner{
+		ClusterProvider: stubClusterProvider{clientset: clientset},
+		Components:      components,
+		Executions:      executions,
+		PollInterval:    time.Millisecond,
+	}
+
+	if err := runner.Run(context.Background(), component); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if n := countCreateActionsFor(clientset, "persistentvolumeclaims"); n != 0 {
+		t.Errorf("countCreateActionsFor(persistentvolumeclaims) = %d, esperava 0 (deveria reaproveitar o PVC existente)", n)
+	}
+}
+
+func TestRunner_StoragePVCErroAoConsultarFalhaComponente(t *testing.T) {
+	components, executions := newRunnerTestDB(t)
+	component := newRunnerTestComponentComStorage(t, components, `{"type":"pvc","pvc":{"size":"5Gi"}}`)
+
+	clientset := fake.NewSimpleClientset()
+	clientset.PrependReactor("get", "persistentvolumeclaims", func(action ktesting.Action) (bool, k8sruntime.Object, error) {
+		return true, nil, errors.New("erro de cluster ao consultar PVC")
+	})
+
+	runner := &Runner{
+		ClusterProvider: stubClusterProvider{clientset: clientset},
+		Components:      components,
+		Executions:      executions,
+		PollInterval:    time.Millisecond,
+	}
+
+	err := runner.Run(context.Background(), component)
+	if err == nil {
+		t.Fatal("Run() deveria retornar erro quando a consulta ao PVC falha")
+	}
+
+	got, getErr := components.Get(context.Background(), component.ID)
+	if getErr != nil {
+		t.Fatalf("Get() error = %v", getErr)
+	}
+	if got.Phase != store.PhaseFailed {
+		t.Errorf("Phase = %q, esperava %q", got.Phase, store.PhaseFailed)
+	}
+}
+
 func TestRunner_NamespacePadrao(t *testing.T) {
 	components, executions := newRunnerTestDB(t)
 	component := newRunnerTestComponent(t, components, "", `{"cluster":"minikube"}`)

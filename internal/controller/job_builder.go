@@ -43,6 +43,25 @@ type jobSecretKeySelectorBlock struct {
 type jobResourcesBlock struct {
 	Requests map[string]string `json:"requests"`
 	Limits   map[string]string `json:"limits"`
+	Storage  *jobStorageBlock  `json:"storage"`
+}
+
+// jobStorageBlock espelha o bloco resources.storage (docs/ARCHITECTURE.md
+// §2.1, deployments/minikube/crd.yaml) usado para anexar armazenamento
+// efêmero ou persistente ao container principal do Job (E4.S5).
+type jobStorageBlock struct {
+	Type      string       `json:"type"`
+	SizeLimit string       `json:"sizeLimit"`
+	Pvc       *jobPvcBlock `json:"pvc"`
+}
+
+// jobPvcBlock espelha resources.storage.pvc, usado somente quando
+// storage.type == "pvc". storageClassName e accessModes têm defaults
+// aplicados por buildStoragePVC quando ausentes; size é obrigatório.
+type jobPvcBlock struct {
+	StorageClassName string   `json:"storageClassName"`
+	AccessModes      []string `json:"accessModes"`
+	Size             string   `json:"size"`
 }
 
 // jobHooksBlock espelha o bloco hooks (preRun/postRun). preRun vira
@@ -88,11 +107,9 @@ func BuildJob(component *store.Component) (*batchv1.Job, error) {
 		return nil, fmt.Errorf("interpretando runtime do componente %q: %w", component.ID, err)
 	}
 
-	var res jobResourcesBlock
-	if len(component.Resources) > 0 {
-		if err := json.Unmarshal(component.Resources, &res); err != nil {
-			return nil, fmt.Errorf("interpretando resources do componente %q: %w", component.ID, err)
-		}
+	res, err := parseJobResources(component)
+	if err != nil {
+		return nil, err
 	}
 
 	envVars := toEnvVars(rt.Env)
@@ -113,26 +130,39 @@ func BuildJob(component *store.Component) (*batchv1.Job, error) {
 		}
 	}
 
+	volume, volumeMount, _, err := buildStoragePlan(component.ID, res.Storage)
+	if err != nil {
+		return nil, fmt.Errorf("interpretando resources.storage do componente %q: %w", component.ID, err)
+	}
+
 	backoffLimit := int32(0)
 	if rt.BackoffLimit != nil {
 		backoffLimit = *rt.BackoffLimit
 	}
 
+	container := corev1.Container{
+		Name:            "main",
+		Image:           component.BuildImageDigest,
+		ImagePullPolicy: corev1.PullNever,
+		Command:         rt.Command,
+		Args:            rt.Args,
+		Env:             envVars,
+		Resources: corev1.ResourceRequirements{
+			Requests: requests,
+			Limits:   limits,
+		},
+	}
+	if volumeMount != nil {
+		container.VolumeMounts = []corev1.VolumeMount{*volumeMount}
+	}
+
 	podSpec := corev1.PodSpec{
 		RestartPolicy:  toRestartPolicy(rt.RestartPolicy),
 		InitContainers: toInitContainers(hooks.PreRun),
-		Containers: []corev1.Container{{
-			Name:            "main",
-			Image:           component.BuildImageDigest,
-			ImagePullPolicy: corev1.PullNever,
-			Command:         rt.Command,
-			Args:            rt.Args,
-			Env:             envVars,
-			Resources: corev1.ResourceRequirements{
-				Requests: requests,
-				Limits:   limits,
-			},
-		}},
+		Containers:     []corev1.Container{container},
+	}
+	if volume != nil {
+		podSpec.Volumes = []corev1.Volume{*volume}
 	}
 
 	job := &batchv1.Job{
@@ -147,6 +177,154 @@ func BuildJob(component *store.Component) (*batchv1.Job, error) {
 		},
 	}
 	return job, nil
+}
+
+// parseJobResources interpreta component.Resources no mesmo formato usado
+// por BuildJob e BuildStoragePVC, evitando duplicar o unmarshal/erro em
+// ambos os pontos de entrada.
+func parseJobResources(component *store.Component) (jobResourcesBlock, error) {
+	var res jobResourcesBlock
+	if len(component.Resources) > 0 {
+		if err := json.Unmarshal(component.Resources, &res); err != nil {
+			return res, fmt.Errorf("interpretando resources do componente %q: %w", component.ID, err)
+		}
+	}
+	return res, nil
+}
+
+// storageVolumeName é o nome do único Volume anexado ao container "main"
+// quando resources.storage está definido (E4.S5) — só existe um container
+// no Job principal, então não há necessidade de nomes distintos por volume.
+const storageVolumeName = "storage"
+
+// storageMountPath é onde o Volume de resources.storage é montado no
+// container "main". Não é configurável pelo Componente: a história define
+// apenas que tipo de armazenamento é usado (ephemeral/pvc), não onde ele
+// aparece no filesystem do container.
+const storageMountPath = "/data"
+
+// defaultStorageClassName é usado quando resources.storage.pvc.storageClassName
+// não é informado. "standard" é a StorageClass padrão do Minikube
+// (docs/ARCHITECTURE.md §4.2, clusterProfiles.minikube.defaultStorageClass) —
+// único cluster suportado hoje por internal/k8s.ClusterProvider.
+const defaultStorageClassName = "standard"
+
+// storagePVCSuffix separa o nome do PersistentVolumeClaim do nome do Job
+// principal (que usa component.ID puro, ver BuildJob), análogo a
+// postRunJobSuffix.
+const storagePVCSuffix = "-data"
+
+// buildStoragePlan traduz resources.storage no Volume/VolumeMount a anexar
+// ao container "main" e, quando type == "pvc", no manifesto do
+// PersistentVolumeClaim que o Runner precisa garantir no cluster antes de
+// aplicar o Job (E4.S5). Retorna todos os valores nil quando storage está
+// ausente — comportamento atual preservado.
+func buildStoragePlan(componentID string, storage *jobStorageBlock) (*corev1.Volume, *corev1.VolumeMount, *corev1.PersistentVolumeClaim, error) {
+	if storage == nil || storage.Type == "" {
+		return nil, nil, nil, nil
+	}
+
+	volumeMount := &corev1.VolumeMount{Name: storageVolumeName, MountPath: storageMountPath}
+
+	if storage.Type == "pvc" {
+		pvc, err := buildStoragePVC(componentID, storage.Pvc)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		volume := &corev1.Volume{
+			Name: storageVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: pvc.Name},
+			},
+		}
+		return volume, volumeMount, pvc, nil
+	}
+
+	var sizeLimit *resource.Quantity
+	if storage.SizeLimit != "" {
+		qty, err := resource.ParseQuantity(storage.SizeLimit)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("quantidade inválida para sizeLimit (%q): %w", storage.SizeLimit, err)
+		}
+		sizeLimit = &qty
+	}
+	volume := &corev1.Volume{
+		Name: storageVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: sizeLimit},
+		},
+	}
+	return volume, volumeMount, nil, nil
+}
+
+// buildStoragePVC gera o manifesto do PersistentVolumeClaim a ser
+// garantido (criado ou reaproveitado, se já existir) quando
+// resources.storage.type == "pvc". size é obrigatório: diferente de
+// storageClassName/accessModes, uma capacidade não pode ter um default
+// implícito sem risco de alocar armazenamento além do esperado pelo
+// usuário.
+func buildStoragePVC(componentID string, pvc *jobPvcBlock) (*corev1.PersistentVolumeClaim, error) {
+	storageClassName := defaultStorageClassName
+	accessModes := []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+	var size string
+
+	if pvc != nil {
+		if pvc.StorageClassName != "" {
+			storageClassName = pvc.StorageClassName
+		}
+		if len(pvc.AccessModes) > 0 {
+			accessModes = toAccessModes(pvc.AccessModes)
+		}
+		size = pvc.Size
+	}
+
+	if size == "" {
+		return nil, fmt.Errorf("resources.storage.pvc.size é obrigatório quando resources.storage.type é %q", "pvc")
+	}
+	qty, err := resource.ParseQuantity(size)
+	if err != nil {
+		return nil, fmt.Errorf("quantidade inválida para resources.storage.pvc.size (%q): %w", size, err)
+	}
+
+	return &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: componentID + storagePVCSuffix,
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes:      accessModes,
+			StorageClassName: &storageClassName,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: qty},
+			},
+		},
+	}, nil
+}
+
+func toAccessModes(modes []string) []corev1.PersistentVolumeAccessMode {
+	result := make([]corev1.PersistentVolumeAccessMode, len(modes))
+	for i, m := range modes {
+		result[i] = corev1.PersistentVolumeAccessMode(m)
+	}
+	return result
+}
+
+// BuildStoragePVC gera o manifesto do PersistentVolumeClaim de um
+// Componente a partir de resources.storage (E4.S5), quando
+// resources.storage.type == "pvc" (nil caso contrário — não há nada a
+// garantir no cluster). Como BuildJob, é uma função pura: não aplica o
+// manifesto no cluster nem decide se o PVC já existe — isso é
+// responsabilidade do Runner, que deve chamá-la antes de aplicar o Job
+// principal (o Volume gerado por BuildJob referencia o PVC pelo nome).
+func BuildStoragePVC(component *store.Component) (*corev1.PersistentVolumeClaim, error) {
+	res, err := parseJobResources(component)
+	if err != nil {
+		return nil, err
+	}
+	_, _, pvc, err := buildStoragePlan(component.ID, res.Storage)
+	if err != nil {
+		return nil, fmt.Errorf("interpretando resources.storage do componente %q: %w", component.ID, err)
+	}
+	return pvc, nil
 }
 
 // PostRunPlan é o resultado de interpretar hooks.postRun: o Job de
