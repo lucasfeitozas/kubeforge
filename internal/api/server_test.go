@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -549,6 +550,42 @@ func TestHandleStatus_JobAindaNaoAplicado(t *testing.T) {
 	}
 }
 
+func TestSSEWriter_Write(t *testing.T) {
+	tests := []struct {
+		name  string
+		chunk string
+		want  string
+	}{
+		{
+			name:  "chunk sem newline final (fixture fake logs do fake clientset)",
+			chunk: "fake logs",
+			want:  "data: fake logs\n\n",
+		},
+		{
+			name:  "chunk multi-linha",
+			chunk: "linha1\nlinha2\n",
+			want:  "data: linha1\ndata: linha2\n\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf strings.Builder
+			w := &sseWriter{w: &buf}
+
+			n, err := w.Write([]byte(tt.chunk))
+			if err != nil {
+				t.Fatalf("Write() error = %v", err)
+			}
+			if n != len(tt.chunk) {
+				t.Errorf("n = %d, esperava %d", n, len(tt.chunk))
+			}
+			if buf.String() != tt.want {
+				t.Errorf("saída = %q, esperava %q", buf.String(), tt.want)
+			}
+		})
+	}
+}
+
 func TestHandleLogs_NaoFollow(t *testing.T) {
 	server, components := newTestServer(t, nil)
 	component := newTestComponent(t, components)
@@ -562,6 +599,9 @@ func TestHandleLogs_NaoFollow(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, corpo = %q, esperava 200", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/plain; charset=utf-8" {
+		t.Errorf("Content-Type = %q, esperava texto plano (fallback estático, E6.S4 AC2)", ct)
 	}
 	if !strings.Contains(rec.Body.String(), "fake logs") {
 		t.Errorf("corpo = %q, esperava conter os logs do pod", rec.Body.String())
@@ -706,13 +746,17 @@ func TestHandleLogs_Follow_StreamAteHttptestServer(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, esperava 200", resp.StatusCode)
 	}
-
-	buf := make([]byte, len("fake logs"))
-	if _, err := resp.Body.Read(buf); err != nil {
-		t.Fatalf("lendo primeiro trecho do stream: %v", err)
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("Content-Type = %q, esperava text/event-stream (E6.S4, AC1)", ct)
 	}
-	if string(buf) != "fake logs" {
-		t.Errorf("primeiro trecho = %q, esperava %q", buf, "fake logs")
+
+	const wantEvent = "data: fake logs\n\n"
+	buf := make([]byte, len(wantEvent))
+	if _, err := io.ReadFull(resp.Body, buf); err != nil {
+		t.Fatalf("lendo primeiro evento SSE do stream: %v", err)
+	}
+	if string(buf) != wantEvent {
+		t.Errorf("primeiro evento = %q, esperava %q", buf, wantEvent)
 	}
 
 	// Fecha a conexão do lado do cliente: o handler no servidor deve notar

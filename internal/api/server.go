@@ -1,10 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -341,11 +343,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleLogs atende GET /components/{id}/logs?follow=true|false&tailLines=N.
-// follow=false (default) devolve o snapshot atual dos logs e encerra a
-// resposta; follow=true mantém a conexão HTTP aberta (chunked, sem
-// Content-Length) reenviando novas linhas conforme controller.StreamPodLogs
-// as produz — equivalente a `kubectl logs -f`, mas via HTTP simples,
-// consumível com curl (ver docs/adrs/0008-status-e-logs-http-poll.md).
+// follow=false (default) devolve o snapshot atual dos logs em texto plano e
+// encerra a resposta — o fallback estático pedido quando o client não
+// suporta streaming (E6.S4, AC2). follow=true transmite os logs via
+// Server-Sent Events (text/event-stream), reenviando novos eventos
+// conforme controller.StreamPodLogs os produz (E6.S4, AC1; ver ADR 0016 —
+// supera a rejeição de SSE da ADR 0008).
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
@@ -356,14 +359,18 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
 	tw := &trackingWriter{w: w}
 	if follow {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		tw.w = &sseWriter{w: w}
 		if flusher, ok := w.(http.Flusher); ok {
 			tw.flusher = flusher
 		}
+	} else {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	}
 
 	if err := controller.StreamPodLogs(r.Context(), s.clusters, s.components, id, tw, follow, tailLines, 0); err != nil {
@@ -419,13 +426,40 @@ func (s *Server) handleCleanup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, cleanupResponse{Removed: items, Count: len(items)})
 }
 
+// sseWriter adapta os bytes de log crus escritos por
+// controller.StreamPodLogs (um io.Writer comum, sem noção de HTTP) para o
+// framing text/event-stream (E6.S4, AC1; ver ADR 0016). Cada chamada de
+// Write vira um evento SSE completo e imediato — uma linha "data: " por
+// linha de log contida no chunk, seguida de uma linha em branco — sem reter
+// nada entre chamadas. Isso importa na prática: o fixture "fake logs" do
+// fake clientset (usado nos testes) nunca termina em "\n"; um framing que
+// esperasse um "\n" para fechar o evento travaria para sempre.
+type sseWriter struct {
+	w io.Writer
+}
+
+func (s *sseWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	for _, line := range bytes.Split(bytes.TrimRight(p, "\n"), []byte("\n")) {
+		if _, err := fmt.Fprintf(s.w, "data: %s\n", line); err != nil {
+			return 0, err
+		}
+	}
+	_, err := io.WriteString(s.w, "\n")
+	return len(p), err
+}
+
 // trackingWriter registra se algum byte já foi efetivamente escrito na
 // resposta HTTP, para que handleLogs só tente reportar um status de erro
 // enquanto isso ainda for possível (nenhum Write anterior). Em follow=true
 // também aciona http.Flusher a cada escrita, para que o cliente receba cada
-// trecho de log assim que produzido, sem esperar o buffer HTTP encher.
+// trecho de log (ou evento SSE) assim que produzido, sem esperar o buffer
+// HTTP encher. w é io.Writer, não http.ResponseWriter: em follow=true
+// envolve um *sseWriter em vez do ResponseWriter cru.
 type trackingWriter struct {
-	w       http.ResponseWriter
+	w       io.Writer
 	flusher http.Flusher
 	wrote   bool
 }

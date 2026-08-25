@@ -214,8 +214,8 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E6.S4 — Endpoint de logs
 **Como** usuário, **quero** `GET /components/{id}/logs` (com suporte a streaming), **para** acompanhar a execução em tempo real.
 - Critérios de aceite:
-  - [ ] Streaming via Server-Sent Events (SSE) ou WebSocket
-  - [ ] Fallback para retorno estático (últimas N linhas) se streaming não for suportado pelo client
+  - [x] Streaming via Server-Sent Events (SSE) ou WebSocket (`sseWriter`, `text/event-stream` em `?follow=true` — ver ADR 0016)
+  - [x] Fallback para retorno estático (últimas N linhas) se streaming não for suportado pelo client (`?follow=false`, já existente desde E4.S4/ADR 0008)
 - Prioridade: média
 
 ---
