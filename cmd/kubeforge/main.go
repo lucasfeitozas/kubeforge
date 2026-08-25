@@ -19,6 +19,7 @@ import (
 	"github.com/lucasfeitozas/kubeforge/internal/controller"
 	"github.com/lucasfeitozas/kubeforge/internal/k8s"
 	"github.com/lucasfeitozas/kubeforge/internal/store"
+	"github.com/lucasfeitozas/kubeforge/web"
 )
 
 type config struct {
@@ -94,7 +95,7 @@ func runServer() {
 		Executions:      executions,
 	}
 
-	apiServer := api.NewServer(components, provider, store.NewCleanupAuditRepository(db), broker, runner)
+	apiServer := api.NewServer(components, provider, store.NewCleanupAuditRepository(db), broker, runner, web.StaticFS())
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.httpPort),
 		Handler: apiServer,

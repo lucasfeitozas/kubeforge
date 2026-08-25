@@ -227,8 +227,8 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E7.S1 — Servidor de arquivos estáticos embutido
 **Como** desenvolvedor, **quero** servir os assets de `web/static` via `embed.FS` no próprio binário, **para** não depender de Nginx ou build step separado no MVP.
 - Critérios de aceite:
-  - [ ] `go:embed` configurado em `cmd/kubeforge`
-  - [ ] Console acessível em `http://localhost:8080`
+  - [x] `go:embed` configurado em `cmd/kubeforge` (pacote `web`, importado e conectado em `cmd/kubeforge/main.go` — ver ADR 0018)
+  - [x] Console acessível em `http://localhost:8080` (`web/static/index.html`, placeholder — UI real em E7.S2-S4)
 - Prioridade: média
 
 ### E7.S2 — Tela de cadastro de Componente
