@@ -11,12 +11,15 @@ import (
 	"time"
 
 	"github.com/lucasfeitozas/kubeforge/internal/build"
+	"github.com/lucasfeitozas/kubeforge/internal/controller"
 	"github.com/lucasfeitozas/kubeforge/internal/store"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 )
 
 // stubClusterProvider devolve sempre o mesmo clientset, ignorando
@@ -41,14 +44,41 @@ func newTestServer(t *testing.T, clientset kubernetes.Interface) (*Server, store
 	}
 
 	components := store.NewComponentRepository(db)
+	executions := store.NewExecutionRepository(db)
 	broker := &build.Broker{
 		Cloner:     build.NewGitCloner(),
 		Builder:    build.NewDockerBuilder(),
 		Components: components,
-		Executions: store.NewExecutionRepository(db),
+		Executions: executions,
 	}
-	server := NewServer(components, stubClusterProvider{clientset: clientset}, store.NewCleanupAuditRepository(db), broker)
+	runner := &controller.Runner{
+		ClusterProvider: stubClusterProvider{clientset: clientset},
+		Components:      components,
+		Executions:      executions,
+	}
+	server := NewServer(components, stubClusterProvider{clientset: clientset}, store.NewCleanupAuditRepository(db), broker, runner)
 	return server, components
+}
+
+// newJobCompleteReactor injeta JobCondition{Type: JobComplete,
+// Status: True} no objeto devolvido por Create antes do fake tracker
+// armazená-lo, tornando testes de controller.Runner.Run determinísticos sem
+// sleep — mesma técnica de internal/controller/runner_test.go
+// (newJobConditionReactor, não reaproveitável entre pacotes/arquivos
+// _test.go).
+func newJobCompleteReactor() ktesting.ReactionFunc {
+	return func(action ktesting.Action) (bool, k8sruntime.Object, error) {
+		createAction, ok := action.(ktesting.CreateAction)
+		if !ok {
+			return false, nil, nil
+		}
+		job, ok := createAction.GetObject().(*batchv1.Job)
+		if !ok {
+			return false, nil, nil
+		}
+		job.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}}
+		return false, nil, nil
+	}
 }
 
 // stubBuildCloner e stubBuildBuilder são Cloner/Builder fakes controlados
@@ -356,6 +386,110 @@ func TestHandleBuildComponent_FalhaAssincronaMarcaComponenteFailed(t *testing.T)
 	}
 }
 
+func TestHandleRunComponent_Sucesso(t *testing.T) {
+	server, components := newTestServer(t, nil)
+	component := newTestComponent(t, components)
+	if err := components.UpdateBuildStatus(context.Background(), component.ID, store.PhaseBuilt, "sha256:teste", ""); err != nil {
+		t.Fatalf("UpdateBuildStatus() error = %v", err)
+	}
+	component.Phase = store.PhaseBuilt
+	component.BuildImageDigest = "sha256:teste"
+
+	clientset := fake.NewSimpleClientset()
+	clientset.PrependReactor("create", "jobs", newJobCompleteReactor())
+	server.clusters = stubClusterProvider{clientset: clientset}
+	server.runner = &controller.Runner{
+		ClusterProvider: server.clusters,
+		Components:      components,
+		Executions:      server.broker.Executions,
+		PollInterval:    time.Millisecond,
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/components/"+component.ID+"/run", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, corpo = %q, esperava 202", rec.Code, rec.Body.String())
+	}
+	var got buildTriggerResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("Unmarshal() error = %v, corpo = %q", err, rec.Body.String())
+	}
+	if got.ComponentID != component.ID || got.Phase != store.PhaseRunning {
+		t.Errorf("buildTriggerResponse = %+v, esperava ComponentID=%q Phase=%q", got, component.ID, store.PhaseRunning)
+	}
+
+	waitForComponentPhase(t, components, component.ID, store.PhaseSucceeded, 2*time.Second)
+}
+
+func TestHandleRunComponent_PhaseNaoBuilt(t *testing.T) {
+	server, components := newTestServer(t, nil)
+	component := newTestComponent(t, components)
+
+	req := httptest.NewRequest(http.MethodPost, "/components/"+component.ID+"/run", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, corpo = %q, esperava 409", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), store.PhaseBuilt) {
+		t.Errorf("corpo = %q, esperava mensagem clara mencionando %q", rec.Body.String(), store.PhaseBuilt)
+	}
+}
+
+func TestHandleRunComponent_ComponenteNaoEncontrado(t *testing.T) {
+	server, _ := newTestServer(t, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/components/id-inexistente/run", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, esperava 404", rec.Code)
+	}
+}
+
+func TestHandleCleanupComponent_RemoveApenasRecursosDoComponente(t *testing.T) {
+	server, components := newTestServer(t, nil)
+	component := newTestComponent(t, components)
+
+	componentJob := newManagedJob(component.ID, "default")
+	outroJob := newManagedJob("outro-componente", "default")
+	server.clusters = stubClusterProvider{clientset: fake.NewSimpleClientset(componentJob, outroJob)}
+
+	req := httptest.NewRequest(http.MethodPost, "/components/"+component.ID+"/cleanup", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, corpo = %q, esperava 200", rec.Code, rec.Body.String())
+	}
+	var got cleanupResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("Unmarshal() error = %v, corpo = %q", err, rec.Body.String())
+	}
+	if got.Count != 1 || len(got.Removed) != 1 {
+		t.Fatalf("cleanupResponse = %+v, esperava 1 recurso removido (só o do componente alvo)", got)
+	}
+	if got.Removed[0].Name != component.ID {
+		t.Errorf("Removed[0].Name = %q, esperava %q", got.Removed[0].Name, component.ID)
+	}
+}
+
+func TestHandleCleanupComponent_ComponenteNaoEncontrado(t *testing.T) {
+	server, _ := newTestServer(t, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/components/id-inexistente/cleanup", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, esperava 404", rec.Code)
+	}
+}
+
 func newJobPod(name, namespace, jobName string, phase corev1.PodPhase) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -546,13 +680,19 @@ func TestHandleLogs_Follow_StreamAteHttptestServer(t *testing.T) {
 	pod := newJobPod(component.ID+"-aaa", "default", component.ID, corev1.PodRunning)
 	clientset := fake.NewSimpleClientset(pod)
 
+	executions := store.NewExecutionRepository(db)
 	broker := &build.Broker{
 		Cloner:     build.NewGitCloner(),
 		Builder:    build.NewDockerBuilder(),
 		Components: components,
-		Executions: store.NewExecutionRepository(db),
+		Executions: executions,
 	}
-	server := NewServer(components, stubClusterProvider{clientset: clientset}, store.NewCleanupAuditRepository(db), broker)
+	runner := &controller.Runner{
+		ClusterProvider: stubClusterProvider{clientset: clientset},
+		Components:      components,
+		Executions:      executions,
+	}
+	server := NewServer(components, stubClusterProvider{clientset: clientset}, store.NewCleanupAuditRepository(db), broker, runner)
 	httpSrv := httptest.NewServer(server)
 	t.Cleanup(httpSrv.Close)
 

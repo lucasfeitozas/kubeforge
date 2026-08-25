@@ -16,6 +16,7 @@ import (
 
 	"github.com/lucasfeitozas/kubeforge/internal/api"
 	"github.com/lucasfeitozas/kubeforge/internal/build"
+	"github.com/lucasfeitozas/kubeforge/internal/controller"
 	"github.com/lucasfeitozas/kubeforge/internal/k8s"
 	"github.com/lucasfeitozas/kubeforge/internal/store"
 )
@@ -87,8 +88,13 @@ func runServer() {
 		Components: components,
 		Executions: executions,
 	}
+	runner := &controller.Runner{
+		ClusterProvider: provider,
+		Components:      components,
+		Executions:      executions,
+	}
 
-	apiServer := api.NewServer(components, provider, store.NewCleanupAuditRepository(db), broker)
+	apiServer := api.NewServer(components, provider, store.NewCleanupAuditRepository(db), broker, runner)
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.httpPort),
 		Handler: apiServer,
