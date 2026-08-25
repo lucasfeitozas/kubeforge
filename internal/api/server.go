@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -21,8 +22,9 @@ import (
 
 // Server expõe via HTTP o CRUD de Componente (E6.S1), o disparo de build
 // (E6.S2) e de run/cleanup por Componente (E6.S3) sob demanda, o
-// acompanhamento de status e logs de um Componente em execução (E4.S4), e o
-// cleanup --all (E5.S2) sobre o cluster resolvido por ClusterProvider.
+// acompanhamento de status e logs de um Componente em execução (E4.S4), o
+// cleanup --all (E5.S2) sobre o cluster resolvido por ClusterProvider, e o
+// Console Web estático embutido no binário (E7.S1).
 type Server struct {
 	mux          *http.ServeMux
 	components   store.ComponentRepository
@@ -40,8 +42,9 @@ const defaultCleanupNamespace = "default"
 
 // NewServer monta as rotas do Server. components, clusters, cleanupAudit,
 // broker e runner já devem estar prontos para uso (banco migrado,
-// kubeconfig acessível) — NewServer não valida nenhum dos cinco.
-func NewServer(components store.ComponentRepository, clusters k8s.ClusterProvider, cleanupAudit store.CleanupAuditRepository, broker *build.Broker, runner *controller.Runner) *Server {
+// kubeconfig acessível) — NewServer não valida nenhum dos cinco. staticFS
+// é o conteúdo de web/static (ver web.StaticFS, E7.S1), servido na raiz.
+func NewServer(components store.ComponentRepository, clusters k8s.ClusterProvider, cleanupAudit store.CleanupAuditRepository, broker *build.Broker, runner *controller.Runner, staticFS fs.FS) *Server {
 	s := &Server{
 		mux:          http.NewServeMux(),
 		components:   components,
@@ -62,6 +65,11 @@ func NewServer(components store.ComponentRepository, clusters k8s.ClusterProvide
 	s.mux.HandleFunc("POST /cleanup", s.handleCleanup)
 	s.mux.HandleFunc("GET /openapi.yaml", s.handleOpenAPISpec)
 	s.mux.HandleFunc("GET /swagger/{$}", s.handleSwaggerUI)
+	// Catch-all (E7.S1): qualquer caminho GET não reconhecido pelas rotas
+	// acima cai aqui — o ServeMux do Go 1.22+ já resolve a precedência por
+	// especificidade de padrão, sem precisar de nenhuma lógica extra (ver
+	// ADR 0018).
+	s.mux.Handle("GET /", http.FileServer(http.FS(staticFS)))
 	return s
 }
 
