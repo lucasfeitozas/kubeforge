@@ -1,0 +1,552 @@
+openapi: 3.0.3
+info:
+  title: KubeForge API
+  description: >-
+    API REST do KubeForge: CRUD de Componente, disparo de build/run/cleanup
+    sob demanda, e acompanhamento de status/logs de execução. Consulte
+    docs/ARCHITECTURE.md (schema completo do Componente, seção 2.2) e as
+    ADRs em docs/adrs/ para o histórico de decisões de cada endpoint.
+  version: "1.0.0"
+servers:
+  - url: http://localhost:8080
+    description: Servidor local (KUBEFORGE_HTTP_PORT, default 8080)
+tags:
+  - name: components
+    description: CRUD e ações sob demanda (build/run/cleanup) de um Componente
+  - name: cleanup
+    description: Remoção de recursos gerenciados no cluster
+
+paths:
+  /components:
+    post:
+      tags: [components]
+      summary: Cria um Componente
+      operationId: createComponent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComponentInput"
+      responses:
+        "201":
+          description: Componente criado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Component"
+        "400":
+          description: Corpo malformado ou violação de validação
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+    get:
+      tags: [components]
+      summary: Lista todos os Componentes
+      operationId: listComponents
+      responses:
+        "200":
+          description: Lista de Componentes (array vazio se nenhum existir)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Component"
+
+  /components/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ComponentId"
+    get:
+      tags: [components]
+      summary: Busca um Componente pelo id
+      operationId: getComponent
+      responses:
+        "200":
+          description: Componente encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Component"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [components]
+      summary: Remove um Componente
+      description: >-
+        Falha (500, sem mapeamento específico hoje — ver ADR 0013) se houver
+        Executions referenciando o Componente (ON DELETE RESTRICT).
+      operationId: deleteComponent
+      responses:
+        "204":
+          description: Componente removido
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /components/{id}/build:
+    parameters:
+      - $ref: "#/components/parameters/ComponentId"
+    post:
+      tags: [components]
+      summary: Dispara o build da imagem do Componente
+      description: >-
+        Assíncrono (ver ADR 0014): marca status.phase=Building e devolve 202
+        imediatamente; o resultado (Built/Failed) é observado depois via
+        GET /components/{id}.
+      operationId: buildComponent
+      responses:
+        "202":
+          description: Build disparado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActionTriggerResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /components/{id}/run:
+    parameters:
+      - $ref: "#/components/parameters/ComponentId"
+    post:
+      tags: [components]
+      summary: Dispara a execução (run) do Componente já buildado
+      description: >-
+        Assíncrono (ver ADR 0015): marca status.phase=Running e devolve 202
+        imediatamente. Falha com 409 se status.phase != Built.
+      operationId: runComponent
+      responses:
+        "202":
+          description: Execução disparada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActionTriggerResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >-
+            Componente ainda não tem status.phase=Built (mensagem em texto
+            plano com a fase atual e a esperada)
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /components/{id}/cleanup:
+    parameters:
+      - $ref: "#/components/parameters/ComponentId"
+    post:
+      tags: [components]
+      summary: Remove os recursos (Job/Pods/PVC) da execução mais recente do Componente
+      description: >-
+        Escopado a este Componente (kubeforge.io/component=<id>), diferente
+        de POST /cleanup (namespace inteiro) — ver ADR 0015.
+      operationId: cleanupComponent
+      responses:
+        "200":
+          description: Recursos removidos (possivelmente nenhum)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CleanupResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /components/{id}/status:
+    parameters:
+      - $ref: "#/components/parameters/ComponentId"
+    get:
+      tags: [components]
+      summary: Status ao vivo do Pod do Job principal em execução
+      description: >-
+        Consulta o cluster diretamente (E4.S4) — não é o status.phase
+        persistido do Componente (esse vem em GET /components/{id}).
+      operationId: getComponentStatus
+      responses:
+        "200":
+          description: Status do Pod
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PodStatus"
+        "404":
+          description: Componente inexistente, ou nenhum Pod ainda (run nunca disparado)
+
+  /components/{id}/logs:
+    parameters:
+      - $ref: "#/components/parameters/ComponentId"
+      - name: follow
+        in: query
+        description: >-
+          true transmite via Server-Sent Events (text/event-stream, ver ADR
+          0016); false (default) devolve um snapshot estático em texto
+          plano — o fallback quando o client não suporta streaming.
+        schema:
+          type: boolean
+          default: false
+      - name: tailLines
+        in: query
+        description: Limita o snapshot às N linhas mais recentes (só relevante com follow=false)
+        schema:
+          type: integer
+          minimum: 0
+    get:
+      tags: [components]
+      summary: Logs do container principal do Pod em execução
+      operationId: getComponentLogs
+      responses:
+        "200":
+          description: Logs (texto plano se follow=false, eventos SSE se follow=true)
+          content:
+            text/plain:
+              schema:
+                type: string
+            text/event-stream:
+              schema:
+                type: string
+                description: 'Eventos "data: <linha>\n\n" por chunk de log recebido'
+        "400":
+          description: tailLines inválido
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Componente inexistente, ou nenhum Pod ainda (run nunca disparado)
+
+  /cleanup:
+    post:
+      tags: [cleanup]
+      summary: Remove todo recurso gerenciado (kubeforge.io/managed=true) no namespace
+      description: >-
+        Namespace inteiro, não escopado a um Componente — ver
+        POST /components/{id}/cleanup para remoção seletiva (E5.S2).
+      operationId: cleanupAll
+      parameters:
+        - name: namespace
+          in: query
+          description: Default "default"
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Recursos removidos (possivelmente nenhum)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CleanupResponse"
+
+components:
+  parameters:
+    ComponentId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    NotFound:
+      description: Componente inexistente
+      content:
+        text/plain:
+          schema:
+            type: string
+
+  schemas:
+    ActionTriggerResponse:
+      type: object
+      properties:
+        componentId:
+          type: string
+          format: uuid
+        phase:
+          type: string
+          enum: [Building, Running]
+
+    PodStatus:
+      type: object
+      properties:
+        podName:
+          type: string
+        phase:
+          type: string
+          enum: [Pending, Running, Succeeded, Failed, Unknown]
+        reason:
+          type: string
+        message:
+          type: string
+
+    CleanupResponse:
+      type: object
+      properties:
+        removed:
+          type: array
+          items:
+            $ref: "#/components/schemas/CleanupItem"
+        count:
+          type: integer
+
+    CleanupItem:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [Job, Pod, PersistentVolumeClaim]
+        name:
+          type: string
+        namespace:
+          type: string
+
+    ValidationError:
+      type: object
+      properties:
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
+
+    FieldError:
+      type: object
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+
+    ComponentInput:
+      type: object
+      description: Corpo aceito por POST /components — id e status são ignorados se enviados.
+      required: [nome, source, resources, runtime, targetContext]
+      properties:
+        nome:
+          type: string
+        descricao:
+          type: string
+        source:
+          $ref: "#/components/schemas/Source"
+        build:
+          $ref: "#/components/schemas/Build"
+        resources:
+          $ref: "#/components/schemas/Resources"
+        runtime:
+          $ref: "#/components/schemas/Runtime"
+        hooks:
+          $ref: "#/components/schemas/Hooks"
+        targetContext:
+          $ref: "#/components/schemas/TargetContext"
+        lifecycle:
+          $ref: "#/components/schemas/Lifecycle"
+      example:
+        nome: carga-cpu
+        source:
+          repoUrl: https://github.com/exemplo/carga-cpu.git
+          ref: { type: branch, value: main }
+        resources:
+          requests: { cpu: 100m, memory: 128Mi }
+        runtime:
+          workloadKind: Job
+          command: ["/app/start.sh"]
+          args: ["--mode=stress"]
+        targetContext:
+          cluster: minikube
+
+    Component:
+      allOf:
+        - type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+        - $ref: "#/components/schemas/ComponentInput"
+        - type: object
+          properties:
+            status:
+              $ref: "#/components/schemas/ComponentStatus"
+
+    ComponentStatus:
+      type: object
+      description: >-
+        Só presente nas respostas (GET/POST /components) — ver ADR 0014.
+        Diferente do status ao vivo do Pod em GET /components/{id}/status.
+      properties:
+        phase:
+          type: string
+          enum: [Pending, Building, Built, Running, Succeeded, Failed, CleanedUp]
+        buildImageDigest:
+          type: string
+        errorMessage:
+          type: string
+
+    Source:
+      type: object
+      required: [repoUrl, ref]
+      properties:
+        repoUrl:
+          type: string
+          format: uri
+        ref:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [branch, tag, commit]
+            value:
+              type: string
+        credentialsSecretRef:
+          type: string
+
+    Build:
+      type: object
+      properties:
+        strategy:
+          type: string
+          enum: [kaniko, buildpacks, doib]
+        dockerfilePath:
+          type: string
+        cacheEnabled:
+          type: boolean
+        imageRepository:
+          type: string
+          description: Repositório/nome da imagem buildada (sem tag)
+        imageTagStrategy:
+          type: string
+          description: Default é a estratégia por commit SHA
+
+    Resources:
+      type: object
+      required: [requests]
+      properties:
+        requests:
+          type: object
+          additionalProperties:
+            type: string
+          example: { cpu: 250m, memory: 512Mi }
+        limits:
+          type: object
+          additionalProperties:
+            type: string
+        storage:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [ephemeral, pvc]
+            sizeLimit:
+              type: string
+              description: Só para type=ephemeral (emptyDir)
+            pvc:
+              type: object
+              description: Só para type=pvc
+              properties:
+                storageClassName:
+                  type: string
+                  description: Default "standard" (StorageClass do Minikube)
+                accessModes:
+                  type: array
+                  items:
+                    type: string
+                size:
+                  type: string
+                  description: Obrigatório quando type=pvc
+
+    Runtime:
+      type: object
+      required: [workloadKind]
+      properties:
+        workloadKind:
+          type: string
+          enum: [Pod, Job, Deployment]
+        command:
+          type: array
+          items:
+            type: string
+        args:
+          type: array
+          items:
+            type: string
+        env:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              value:
+                type: string
+              valueFrom:
+                type: object
+                properties:
+                  secretKeyRef:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      key:
+                        type: string
+        restartPolicy:
+          type: string
+          description: Default "Never"
+        logLevel:
+          type: string
+        backoffLimit:
+          type: integer
+          description: Default 0
+
+    Hooks:
+      type: object
+      properties:
+        preRun:
+          type: array
+          description: Viram Init Containers do Job principal, na ordem declarada
+          items:
+            $ref: "#/components/schemas/HookItem"
+        postRun:
+          type: array
+          description: Rodam como um Job de verificação separado, em paralelo entre si
+          items:
+            allOf:
+              - $ref: "#/components/schemas/HookItem"
+              - type: object
+                properties:
+                  continueOnError:
+                    type: boolean
+                    description: Default false — falha derruba a execução para Failed
+
+    HookItem:
+      type: object
+      properties:
+        name:
+          type: string
+        image:
+          type: string
+        command:
+          type: array
+          items:
+            type: string
+
+    TargetContext:
+      type: object
+      required: [cluster]
+      properties:
+        cluster:
+          type: string
+          enum: [minikube, eks]
+        namespace:
+          type: string
+          description: Default "default"
+
+    Lifecycle:
+      type: object
+      properties:
+        ttlSecondsAfterFinished:
+          type: integer
+          description: Default 3600
+        activeDeadlineSeconds:
+          type: integer
+          description: Default 1800
+        cleanupPolicy:
+          type: string
+          enum: [onSuccess, onFailure, onSuccessAndFailure, manual]

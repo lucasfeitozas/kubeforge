@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -59,6 +60,8 @@ func NewServer(components store.ComponentRepository, clusters k8s.ClusterProvide
 	s.mux.HandleFunc("GET /components/{id}/status", s.handleStatus)
 	s.mux.HandleFunc("GET /components/{id}/logs", s.handleLogs)
 	s.mux.HandleFunc("POST /cleanup", s.handleCleanup)
+	s.mux.HandleFunc("GET /openapi.yaml", s.handleOpenAPISpec)
+	s.mux.HandleFunc("GET /swagger/{$}", s.handleSwaggerUI)
 	return s
 }
 
@@ -66,6 +69,56 @@ func NewServer(components store.ComponentRepository, clusters k8s.ClusterProvide
 // como Handler de um http.Server (ver cmd/kubeforge/main.go).
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
+}
+
+// openAPISpecYAML é o contrato OpenAPI 3.0 de todas as rotas deste
+// arquivo, embutido no binário via go:embed (fica em internal/api, não em
+// docs/, porque go:embed não permite referenciar um caminho fora da árvore
+// do pacote). Servido cru em GET /openapi.yaml, e consumido pela página de
+// GET /swagger/ (ver ADR 0017).
+//
+//go:embed openapi.yaml
+var openAPISpecYAML string
+
+// handleOpenAPISpec atende GET /openapi.yaml.
+func (s *Server) handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+	_, _ = io.WriteString(w, openAPISpecYAML)
+}
+
+// swaggerUIHTML carrega o bundle do Swagger UI via CDN (unpkg), apontando
+// para GET /openapi.yaml — sem dependência Go nova nem asset vendorizado no
+// repositório (ver ADR 0017). Só exige internet para abrir a página; os
+// demais endpoints da API continuam 100% locais.
+const swaggerUIHTML = `<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>KubeForge API — Swagger UI</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+  <script>
+    window.onload = function() {
+      window.ui = SwaggerUIBundle({
+        url: "/openapi.yaml",
+        dom_id: "#swagger-ui",
+        presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+      });
+    };
+  </script>
+</body>
+</html>
+`
+
+// handleSwaggerUI atende GET /swagger/, servindo a UI interativa do
+// Swagger (issue #54 — "Configurar swagger nos endpoints").
+func (s *Server) handleSwaggerUI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = io.WriteString(w, swaggerUIHTML)
 }
 
 // componentDTO é o corpo JSON de requisição/resposta do CRUD de Componente

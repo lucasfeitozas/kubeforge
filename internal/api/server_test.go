@@ -765,3 +765,42 @@ func TestHandleLogs_Follow_StreamAteHttptestServer(t *testing.T) {
 	// StreamPodLogs/ctx.Done em internal/controller/status.go).
 	resp.Body.Close()
 }
+
+func TestHandleOpenAPISpec_Sucesso(t *testing.T) {
+	server, _ := newTestServer(t, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/openapi.yaml", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, esperava 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/yaml; charset=utf-8" {
+		t.Errorf("Content-Type = %q, esperava application/yaml; charset=utf-8", ct)
+	}
+	if !strings.Contains(rec.Body.String(), "openapi: 3.0.3") {
+		t.Errorf("corpo não parece um documento OpenAPI: %q", rec.Body.String()[:min(80, rec.Body.Len())])
+	}
+	if !strings.Contains(rec.Body.String(), "/components/{id}/build") {
+		t.Errorf("corpo não documenta /components/{id}/build")
+	}
+}
+
+func TestHandleSwaggerUI_Sucesso(t *testing.T) {
+	server, _ := newTestServer(t, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/swagger/", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, esperava 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Errorf("Content-Type = %q, esperava text/html; charset=utf-8", ct)
+	}
+	if !strings.Contains(rec.Body.String(), `url: "/openapi.yaml"`) {
+		t.Errorf("corpo não aponta o Swagger UI para /openapi.yaml: %q", rec.Body.String())
+	}
+}
