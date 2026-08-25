@@ -193,29 +193,29 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E6.S1 — Endpoints CRUD de Componente
 **Como** usuário, **quero** endpoints REST para criar, listar, obter e remover Componentes, **para** gerenciá-los sem editar YAML manualmente.
 - Critérios de aceite:
-  - [ ] `POST /components`, `GET /components`, `GET /components/{id}`, `DELETE /components/{id}`
-  - [ ] Respostas em JSON seguindo o schema da seção 2.2
+  - [x] `POST /components`, `GET /components`, `GET /components/{id}`, `DELETE /components/{id}`
+  - [x] Respostas em JSON seguindo o schema da seção 2.2 (`componentDTO` em `internal/api/server.go` — ver ADR 0013)
 - Prioridade: alta
 
 ### E6.S2 — Endpoint de ação "Build"
 **Como** usuário, **quero** `POST /components/{id}/build` para disparar o Build Broker, **para** buildar a imagem sob demanda.
 - Critérios de aceite:
-  - [ ] Retorna imediatamente com `status=Building`; build roda de forma assíncrona (goroutine)
-  - [ ] Endpoint de consulta de status reflete o progresso
+  - [x] Retorna imediatamente com `status=Building`; build roda de forma assíncrona (goroutine)
+  - [x] Endpoint de consulta de status reflete o progresso (`status` em `componentDTO`, `GET /components/{id}` — ver ADR 0014)
 - Prioridade: alta
 
 ### E6.S3 — Endpoint de ação "Run" e "Cleanup"
 **Como** usuário, **quero** `POST /components/{id}/run` e `POST /components/{id}/cleanup`, **para** executar e limpar um Componente específico via API.
 - Critérios de aceite:
-  - [ ] `run` falha com mensagem clara se o Componente ainda não tiver `status.phase=Built`
-  - [ ] `cleanup` remove os recursos da execução mais recente
+  - [x] `run` falha com mensagem clara se o Componente ainda não tiver `status.phase=Built`
+  - [x] `cleanup` remove os recursos da execução mais recente (`RunComponentCleanup`, escopado por `kubeforge.io/component=<id>` — ver ADR 0015)
 - Prioridade: alta
 
 ### E6.S4 — Endpoint de logs
 **Como** usuário, **quero** `GET /components/{id}/logs` (com suporte a streaming), **para** acompanhar a execução em tempo real.
 - Critérios de aceite:
-  - [ ] Streaming via Server-Sent Events (SSE) ou WebSocket
-  - [ ] Fallback para retorno estático (últimas N linhas) se streaming não for suportado pelo client
+  - [x] Streaming via Server-Sent Events (SSE) ou WebSocket (`sseWriter`, `text/event-stream` em `?follow=true` — ver ADR 0016)
+  - [x] Fallback para retorno estático (últimas N linhas) se streaming não for suportado pelo client (`?follow=false`, já existente desde E4.S4/ADR 0008)
 - Prioridade: média
 
 ---

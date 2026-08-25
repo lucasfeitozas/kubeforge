@@ -102,6 +102,13 @@ logs (com `?tailLines=N` opcional), uma única chamada, sem polling.
 
 ### Transporte HTTP: texto plano chunked, sem framing SSE
 
+> **Superada pela [ADR 0016](0016-streaming-de-logs-via-sse.md)** (E6.S4):
+> o motivo abaixo para descartar SSE — "nenhum consumidor no projeto
+> hoje" — deixou de valer quando uma história posterior passou a exigir
+> exatamente esse framing. `follow=true` hoje responde
+> `text/event-stream`; o restante desta decisão (polling sobre `GetLogs`,
+> sem `PodLogOptions.Follow`) continua válido e inalterado.
+
 Com `follow=true`, o handler não define `Content-Length`, ativa `http.Flusher` a cada
 escrita (`trackingWriter`, `internal/api/server.go`) e deixa o Go `net/http` responder com
 `Transfer-Encoding: chunked` — funciona com `curl` puro, sem cliente HTTP com suporte a

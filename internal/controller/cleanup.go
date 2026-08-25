@@ -34,13 +34,45 @@ type CleanupResult struct {
 // coletados são retornados junto do erro, para que o chamador ainda
 // registre a auditoria do que foi removido até ali.
 func RunCleanup(ctx context.Context, provider k8s.ClusterProvider, clusterKey, namespace string) ([]CleanupResult, error) {
+	return runCleanupWithSelector(ctx, provider, clusterKey, namespace, managedLabelSelector)
+}
+
+// RunComponentCleanup remove os recursos (Job principal, Job de
+// verificação, Pods e PersistentVolumeClaim) do Componente componentID —
+// não o namespace inteiro (E6.S3, AC2: "cleanup remove os recursos da
+// execução mais recente"). Como Job/PVC têm nomes determinísticos por
+// componentID (ver BuildJob/BuildPostRunJob/buildStoragePVC em
+// internal/controller/job_builder.go), só existe uma geração de recursos
+// rotulados kubeforge.io/component=<id> viva no cluster a qualquer
+// momento: filtrar por esse label já escopa exatamente para a execução
+// mais recente, sem precisar consultar a tabela executions (ver ADR 0015).
+//
+// Retorna store.ErrComponentNotFound se componentID não existir.
+func RunComponentCleanup(ctx context.Context, provider k8s.ClusterProvider, components store.ComponentRepository, componentID string) ([]CleanupResult, error) {
+	component, err := components.Get(ctx, componentID)
+	if err != nil {
+		return nil, err
+	}
+
+	tc, err := parseTargetContext(component.TargetContext)
+	if err != nil {
+		return nil, fmt.Errorf("interpretando targetContext do componente %q: %w", componentID, err)
+	}
+
+	selector := managedLabelSelector + "," + componentLabelKey + "=" + componentID
+	return runCleanupWithSelector(ctx, provider, tc.Cluster, tc.Namespace, selector)
+}
+
+// runCleanupWithSelector implementa RunCleanup/RunComponentCleanup,
+// parametrizada pelo label selector usado para listar Jobs/Pods/PVCs.
+func runCleanupWithSelector(ctx context.Context, provider k8s.ClusterProvider, clusterKey, namespace, labelSelector string) ([]CleanupResult, error) {
 	clientset, err := provider.GetClientset(ctx, clusterKey)
 	if err != nil {
 		return nil, fmt.Errorf("obtendo clientset do cluster %q: %w", clusterKey, err)
 	}
 
 	var results []CleanupResult
-	listOpts := metav1.ListOptions{LabelSelector: managedLabelSelector}
+	listOpts := metav1.ListOptions{LabelSelector: labelSelector}
 
 	jobs, err := clientset.BatchV1().Jobs(namespace).List(ctx, listOpts)
 	if err != nil {
