@@ -16,17 +16,17 @@ import (
 	"github.com/lucasfeitozas/kubeforge/internal/store"
 )
 
-// Server expõe via HTTP o CRUD de Componente (E6.S1), o disparo de build sob
-// demanda (E6.S2), o acompanhamento de status e logs de um Componente em
-// execução (E4.S4), e o cleanup --all (E5.S2) sobre o cluster resolvido por
-// ClusterProvider — a ação run sob demanda (E6.S3) continua fora do escopo
-// desta história.
+// Server expõe via HTTP o CRUD de Componente (E6.S1), o disparo de build
+// (E6.S2) e de run/cleanup por Componente (E6.S3) sob demanda, o
+// acompanhamento de status e logs de um Componente em execução (E4.S4), e o
+// cleanup --all (E5.S2) sobre o cluster resolvido por ClusterProvider.
 type Server struct {
 	mux          *http.ServeMux
 	components   store.ComponentRepository
 	clusters     k8s.ClusterProvider
 	cleanupAudit store.CleanupAuditRepository
 	broker       *build.Broker
+	runner       *controller.Runner
 }
 
 // defaultCleanupNamespace é usado quando POST /cleanup não informa
@@ -35,22 +35,25 @@ type Server struct {
 // associado a um Componente/targetContext.
 const defaultCleanupNamespace = "default"
 
-// NewServer monta as rotas do Server. components, clusters, cleanupAudit e
-// broker já devem estar prontos para uso (banco migrado, kubeconfig
-// acessível) — NewServer não valida nenhum dos quatro.
-func NewServer(components store.ComponentRepository, clusters k8s.ClusterProvider, cleanupAudit store.CleanupAuditRepository, broker *build.Broker) *Server {
+// NewServer monta as rotas do Server. components, clusters, cleanupAudit,
+// broker e runner já devem estar prontos para uso (banco migrado,
+// kubeconfig acessível) — NewServer não valida nenhum dos cinco.
+func NewServer(components store.ComponentRepository, clusters k8s.ClusterProvider, cleanupAudit store.CleanupAuditRepository, broker *build.Broker, runner *controller.Runner) *Server {
 	s := &Server{
 		mux:          http.NewServeMux(),
 		components:   components,
 		clusters:     clusters,
 		cleanupAudit: cleanupAudit,
 		broker:       broker,
+		runner:       runner,
 	}
 	s.mux.HandleFunc("POST /components", s.handleCreateComponent)
 	s.mux.HandleFunc("GET /components", s.handleListComponents)
 	s.mux.HandleFunc("GET /components/{id}", s.handleGetComponent)
 	s.mux.HandleFunc("DELETE /components/{id}", s.handleDeleteComponent)
 	s.mux.HandleFunc("POST /components/{id}/build", s.handleBuildComponent)
+	s.mux.HandleFunc("POST /components/{id}/run", s.handleRunComponent)
+	s.mux.HandleFunc("POST /components/{id}/cleanup", s.handleCleanupComponent)
 	s.mux.HandleFunc("GET /components/{id}/status", s.handleStatus)
 	s.mux.HandleFunc("GET /components/{id}/logs", s.handleLogs)
 	s.mux.HandleFunc("POST /cleanup", s.handleCleanup)
@@ -240,6 +243,76 @@ func (s *Server) handleBuildComponent(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	writeJSON(w, http.StatusAccepted, buildTriggerResponse{ComponentID: component.ID, Phase: store.PhaseBuilding})
+}
+
+// handleRunComponent atende POST /components/{id}/run (E6.S3, AC1): rejeita
+// com 409 e mensagem clara se o Componente ainda não tiver
+// status.phase=Built, senão marca Running de forma síncrona (mesmo padrão
+// de handleBuildComponent/ADR 0014: resposta e um GET imediato já refletem
+// o novo estado) e dispara controller.Runner.Run em uma goroutine,
+// devolvendo 202 sem esperar a execução terminar (ver ADR 0015). Como a
+// fase já vira Running antes da resposta, uma segunda chamada de run
+// enquanto a primeira ainda está em andamento cai na mesma checagem de
+// fase — sem precisar de lock dedicado.
+func (s *Server) handleRunComponent(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	component, err := s.components.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	if component.Phase != store.PhaseBuilt {
+		http.Error(w, fmt.Sprintf(
+			"componente %q não pode ser executado: phase atual é %q, esperado %q (build ainda não concluído com sucesso)",
+			id, component.Phase, store.PhaseBuilt,
+		), http.StatusConflict)
+		return
+	}
+
+	if err := s.components.UpdateBuildStatus(r.Context(), component.ID, store.PhaseRunning, component.BuildImageDigest, ""); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	// context.Background(), não r.Context(): mesma razão de
+	// handleBuildComponent — a execução precisa continuar mesmo depois da
+	// resposta HTTP ser enviada.
+	go func() {
+		if err := s.runner.Run(context.Background(), component); err != nil {
+			slog.Error("execução assíncrona falhou", "component_id", component.ID, "error", err)
+		}
+	}()
+
+	writeJSON(w, http.StatusAccepted, buildTriggerResponse{ComponentID: component.ID, Phase: store.PhaseRunning})
+}
+
+// handleCleanupComponent atende POST /components/{id}/cleanup (E6.S3, AC2):
+// remove os recursos (Job principal, Job de verificação, Pods, PVC) do
+// Componente id via controller.RunComponentCleanup — que, por os nomes
+// desses recursos serem determinísticos por componentID, sempre corresponde
+// à execução mais recente (ver ADR 0015). Responde com os mesmos tipos já
+// usados por handleCleanup (POST /cleanup global).
+func (s *Server) handleCleanupComponent(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	results, err := controller.RunComponentCleanup(r.Context(), s.clusters, s.components, id)
+
+	if auditErr := controller.PersistCleanupAudit(r.Context(), s.cleanupAudit, results); auditErr != nil {
+		slog.Error("erro ao registrar auditoria de cleanup do componente", "component_id", id, "error", auditErr)
+	}
+
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	items := make([]cleanupItem, len(results))
+	for i, res := range results {
+		items[i] = cleanupItem{Kind: res.Kind, Name: res.Name, Namespace: res.Namespace}
+	}
+	writeJSON(w, http.StatusOK, cleanupResponse{Removed: items, Count: len(items)})
 }
 
 // statusResponse é o corpo JSON devolvido por GET /components/{id}/status.

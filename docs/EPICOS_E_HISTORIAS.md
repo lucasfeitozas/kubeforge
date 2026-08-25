@@ -207,8 +207,8 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E6.S3 — Endpoint de ação "Run" e "Cleanup"
 **Como** usuário, **quero** `POST /components/{id}/run` e `POST /components/{id}/cleanup`, **para** executar e limpar um Componente específico via API.
 - Critérios de aceite:
-  - [ ] `run` falha com mensagem clara se o Componente ainda não tiver `status.phase=Built`
-  - [ ] `cleanup` remove os recursos da execução mais recente
+  - [x] `run` falha com mensagem clara se o Componente ainda não tiver `status.phase=Built`
+  - [x] `cleanup` remove os recursos da execução mais recente (`RunComponentCleanup`, escopado por `kubeforge.io/component=<id>` — ver ADR 0015)
 - Prioridade: alta
 
 ### E6.S4 — Endpoint de logs
