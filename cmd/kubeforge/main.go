@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lucasfeitozas/kubeforge/internal/api"
+	"github.com/lucasfeitozas/kubeforge/internal/build"
 	"github.com/lucasfeitozas/kubeforge/internal/k8s"
 	"github.com/lucasfeitozas/kubeforge/internal/store"
 )
@@ -78,7 +79,16 @@ func runServer() {
 		"platform", serverVersion.Platform,
 	)
 
-	apiServer := api.NewServer(store.NewComponentRepository(db), provider, store.NewCleanupAuditRepository(db))
+	components := store.NewComponentRepository(db)
+	executions := store.NewExecutionRepository(db)
+	broker := &build.Broker{
+		Cloner:     build.NewGitCloner(),
+		Builder:    build.NewDockerBuilder(),
+		Components: components,
+		Executions: executions,
+	}
+
+	apiServer := api.NewServer(components, provider, store.NewCleanupAuditRepository(db), broker)
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.httpPort),
 		Handler: apiServer,

@@ -3,12 +3,14 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/lucasfeitozas/kubeforge/internal/build"
 	"github.com/lucasfeitozas/kubeforge/internal/store"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -39,8 +41,59 @@ func newTestServer(t *testing.T, clientset kubernetes.Interface) (*Server, store
 	}
 
 	components := store.NewComponentRepository(db)
-	server := NewServer(components, stubClusterProvider{clientset: clientset}, store.NewCleanupAuditRepository(db))
+	broker := &build.Broker{
+		Cloner:     build.NewGitCloner(),
+		Builder:    build.NewDockerBuilder(),
+		Components: components,
+		Executions: store.NewExecutionRepository(db),
+	}
+	server := NewServer(components, stubClusterProvider{clientset: clientset}, store.NewCleanupAuditRepository(db), broker)
 	return server, components
+}
+
+// stubBuildCloner e stubBuildBuilder são Cloner/Builder fakes controlados
+// diretamente pelo teste, para injetar em server.broker sem depender de git
+// ou docker reais — mesma convenção de stubCloner/stubBuilder em
+// internal/build/broker_test.go (não reaproveitáveis diretamente por
+// estarem em outro pacote/arquivo _test.go).
+type stubBuildCloner struct {
+	result *build.CloneResult
+	err    error
+}
+
+func (s *stubBuildCloner) Clone(ctx context.Context, spec build.CloneSpec, destDir string) (*build.CloneResult, error) {
+	return s.result, s.err
+}
+
+type stubBuildBuilder struct {
+	result *build.BuildResult
+	err    error
+}
+
+func (s *stubBuildBuilder) Build(ctx context.Context, spec build.BuildSpec) (*build.BuildResult, error) {
+	return s.result, s.err
+}
+
+// waitForComponentPhase faz polling em components.Get até que o componente
+// id atinja phase want ou timeout se esgote — necessário porque
+// handleBuildComponent dispara o build em uma goroutine (E6.S2, AC1): o
+// teste não tem outro sinal síncrono de que o Broker.Run terminou.
+func waitForComponentPhase(t *testing.T, components store.ComponentRepository, id, want string, timeout time.Duration) *store.Component {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		c, err := components.Get(context.Background(), id)
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if c.Phase == want {
+			return c
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("componente %q não atingiu phase=%q a tempo (phase atual = %q)", id, want, c.Phase)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func newTestComponent(t *testing.T, components store.ComponentRepository) *store.Component {
@@ -234,6 +287,75 @@ func TestHandleDeleteComponent_NaoEncontrado(t *testing.T) {
 	}
 }
 
+func TestHandleBuildComponent_Sucesso(t *testing.T) {
+	server, components := newTestServer(t, nil)
+	component := newTestComponent(t, components)
+
+	server.broker = &build.Broker{
+		Cloner:     &stubBuildCloner{result: &build.CloneResult{Dir: t.TempDir(), CommitSHA: "abc1234"}},
+		Builder:    &stubBuildBuilder{result: &build.BuildResult{ImageTag: "kubeforge/teste:abc1234", CommitSHA: "abc1234", Digest: "sha256:teste"}},
+		Components: components,
+		Executions: server.broker.Executions,
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/components/"+component.ID+"/build", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, corpo = %q, esperava 202", rec.Code, rec.Body.String())
+	}
+	var got buildTriggerResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("Unmarshal() error = %v, corpo = %q", err, rec.Body.String())
+	}
+	if got.ComponentID != component.ID || got.Phase != store.PhaseBuilding {
+		t.Errorf("buildTriggerResponse = %+v, esperava ComponentID=%q Phase=%q", got, component.ID, store.PhaseBuilding)
+	}
+
+	updated := waitForComponentPhase(t, components, component.ID, store.PhaseBuilt, 2*time.Second)
+	if updated.BuildImageDigest != "sha256:teste" {
+		t.Errorf("BuildImageDigest = %q, esperava %q", updated.BuildImageDigest, "sha256:teste")
+	}
+}
+
+func TestHandleBuildComponent_ComponenteNaoEncontrado(t *testing.T) {
+	server, _ := newTestServer(t, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/components/id-inexistente/build", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, esperava 404", rec.Code)
+	}
+}
+
+func TestHandleBuildComponent_FalhaAssincronaMarcaComponenteFailed(t *testing.T) {
+	server, components := newTestServer(t, nil)
+	component := newTestComponent(t, components)
+
+	server.broker = &build.Broker{
+		Cloner:     &stubBuildCloner{err: errors.New("clone falhou: repositório inacessível")},
+		Builder:    &stubBuildBuilder{},
+		Components: components,
+		Executions: server.broker.Executions,
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/components/"+component.ID+"/build", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, corpo = %q, esperava 202 mesmo quando o build falha de forma assíncrona", rec.Code, rec.Body.String())
+	}
+
+	updated := waitForComponentPhase(t, components, component.ID, store.PhaseFailed, 2*time.Second)
+	if updated.ErrorMessage == "" {
+		t.Errorf("ErrorMessage vazio, esperava a causa da falha de clone")
+	}
+}
+
 func newJobPod(name, namespace, jobName string, phase corev1.PodPhase) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -424,7 +546,13 @@ func TestHandleLogs_Follow_StreamAteHttptestServer(t *testing.T) {
 	pod := newJobPod(component.ID+"-aaa", "default", component.ID, corev1.PodRunning)
 	clientset := fake.NewSimpleClientset(pod)
 
-	server := NewServer(components, stubClusterProvider{clientset: clientset}, store.NewCleanupAuditRepository(db))
+	broker := &build.Broker{
+		Cloner:     build.NewGitCloner(),
+		Builder:    build.NewDockerBuilder(),
+		Components: components,
+		Executions: store.NewExecutionRepository(db),
+	}
+	server := NewServer(components, stubClusterProvider{clientset: clientset}, store.NewCleanupAuditRepository(db), broker)
 	httpSrv := httptest.NewServer(server)
 	t.Cleanup(httpSrv.Close)
 

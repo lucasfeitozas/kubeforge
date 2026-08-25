@@ -1,6 +1,6 @@
 # ADR 0013 — CRUD HTTP de Componente: DTO fiel à seção 2.2, lista sem envelope, FK-restrict não vira 409
 
-**Status:** Aceita
+**Status:** Aceita — decisão 1 superada pela [ADR 0014](0014-endpoint-build-sob-demanda.md)
 **Data:** 2026-08-25
 **Contexto da história:** E6.S1 — Endpoints CRUD de Componente
 
@@ -19,6 +19,14 @@ conexão e são registradas aqui.
 ## Decisão
 
 ### O DTO HTTP espelha a seção 2.2 exatamente, sem campos de status
+
+> **Superada pela ADR 0014** (E6.S2): a premissa abaixo — de que
+> `GET /components/{id}/status` cobriria os campos de status — vale para
+> status de *execução* (Pod/Job), não para status de *build*, que não tinha
+> nenhum outro canal de observação. `componentDTO` passou a incluir um
+> objeto `status` (phase/buildImageDigest/errorMessage) nas respostas. O
+> restante desta decisão (nenhum campo de status aceito em `POST
+> /components`) continua válido.
 
 `componentDTO` (`internal/api/server.go`) expõe só os campos do schema §2.2:
 `id, nome, descricao, source, build, resources, runtime, hooks,

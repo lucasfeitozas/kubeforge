@@ -1,28 +1,32 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 
+	"github.com/lucasfeitozas/kubeforge/internal/build"
 	"github.com/lucasfeitozas/kubeforge/internal/controller"
 	"github.com/lucasfeitozas/kubeforge/internal/k8s"
 	"github.com/lucasfeitozas/kubeforge/internal/store"
 )
 
-// Server expõe via HTTP o CRUD de Componente (E6.S1), o acompanhamento de
-// status e logs de um Componente em execução (E4.S4), e o cleanup --all
-// (E5.S2) sobre o cluster resolvido por ClusterProvider — as ações
-// build/run sob demanda (E6.S2/E6.S3) continuam fora do escopo desta
-// história.
+// Server expõe via HTTP o CRUD de Componente (E6.S1), o disparo de build sob
+// demanda (E6.S2), o acompanhamento de status e logs de um Componente em
+// execução (E4.S4), e o cleanup --all (E5.S2) sobre o cluster resolvido por
+// ClusterProvider — a ação run sob demanda (E6.S3) continua fora do escopo
+// desta história.
 type Server struct {
 	mux          *http.ServeMux
 	components   store.ComponentRepository
 	clusters     k8s.ClusterProvider
 	cleanupAudit store.CleanupAuditRepository
+	broker       *build.Broker
 }
 
 // defaultCleanupNamespace é usado quando POST /cleanup não informa
@@ -31,20 +35,22 @@ type Server struct {
 // associado a um Componente/targetContext.
 const defaultCleanupNamespace = "default"
 
-// NewServer monta as rotas do Server. components, clusters e cleanupAudit já
-// devem estar prontos para uso (banco migrado, kubeconfig acessível) —
-// NewServer não valida nenhum dos três.
-func NewServer(components store.ComponentRepository, clusters k8s.ClusterProvider, cleanupAudit store.CleanupAuditRepository) *Server {
+// NewServer monta as rotas do Server. components, clusters, cleanupAudit e
+// broker já devem estar prontos para uso (banco migrado, kubeconfig
+// acessível) — NewServer não valida nenhum dos quatro.
+func NewServer(components store.ComponentRepository, clusters k8s.ClusterProvider, cleanupAudit store.CleanupAuditRepository, broker *build.Broker) *Server {
 	s := &Server{
 		mux:          http.NewServeMux(),
 		components:   components,
 		clusters:     clusters,
 		cleanupAudit: cleanupAudit,
+		broker:       broker,
 	}
 	s.mux.HandleFunc("POST /components", s.handleCreateComponent)
 	s.mux.HandleFunc("GET /components", s.handleListComponents)
 	s.mux.HandleFunc("GET /components/{id}", s.handleGetComponent)
 	s.mux.HandleFunc("DELETE /components/{id}", s.handleDeleteComponent)
+	s.mux.HandleFunc("POST /components/{id}/build", s.handleBuildComponent)
 	s.mux.HandleFunc("GET /components/{id}/status", s.handleStatus)
 	s.mux.HandleFunc("GET /components/{id}/logs", s.handleLogs)
 	s.mux.HandleFunc("POST /cleanup", s.handleCleanup)
@@ -58,22 +64,33 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // componentDTO é o corpo JSON de requisição/resposta do CRUD de Componente
-// (POST/GET/DELETE /components), espelhando exatamente o schema
-// "Componente" da seção 2.2 de docs/ARCHITECTURE.md — sem os campos de
-// status (phase, buildImageDigest, errorMessage, createdAt, updatedAt), que
-// pertencem à camada de status/CRD e já são expostos por
-// GET /components/{id}/status (ver ADR 0013).
+// (POST/GET/DELETE /components), espelhando o schema "Componente" da seção
+// 2.2 de docs/ARCHITECTURE.md, mais o objeto "status" (mesmo formato do
+// status.* do CRD, docs/ARCHITECTURE.md linhas 169-171) — presente só nas
+// respostas, ignorado se enviado em POST /components (ver ADR 0014, que
+// supera a exclusão original da ADR 0013: não há outro canal para observar
+// o progresso de um build disparado por POST /components/{id}/build).
 type componentDTO struct {
-	ID            string          `json:"id,omitempty"`
-	Nome          string          `json:"nome"`
-	Descricao     string          `json:"descricao,omitempty"`
-	Source        json.RawMessage `json:"source,omitempty"`
-	Build         json.RawMessage `json:"build,omitempty"`
-	Resources     json.RawMessage `json:"resources,omitempty"`
-	Runtime       json.RawMessage `json:"runtime,omitempty"`
-	Hooks         json.RawMessage `json:"hooks,omitempty"`
-	TargetContext json.RawMessage `json:"targetContext,omitempty"`
-	Lifecycle     json.RawMessage `json:"lifecycle,omitempty"`
+	ID            string              `json:"id,omitempty"`
+	Nome          string              `json:"nome"`
+	Descricao     string              `json:"descricao,omitempty"`
+	Source        json.RawMessage     `json:"source,omitempty"`
+	Build         json.RawMessage     `json:"build,omitempty"`
+	Resources     json.RawMessage     `json:"resources,omitempty"`
+	Runtime       json.RawMessage     `json:"runtime,omitempty"`
+	Hooks         json.RawMessage     `json:"hooks,omitempty"`
+	TargetContext json.RawMessage     `json:"targetContext,omitempty"`
+	Lifecycle     json.RawMessage     `json:"lifecycle,omitempty"`
+	Status        *componentStatusDTO `json:"status,omitempty"`
+}
+
+// componentStatusDTO reflete status.phase/buildImageDigest/errorMessage do
+// Componente (E6.S2, AC2: "endpoint de consulta de status reflete o
+// progresso").
+type componentStatusDTO struct {
+	Phase            string `json:"phase"`
+	BuildImageDigest string `json:"buildImageDigest,omitempty"`
+	ErrorMessage     string `json:"errorMessage,omitempty"`
 }
 
 func componentToDTO(c *store.Component) componentDTO {
@@ -88,6 +105,11 @@ func componentToDTO(c *store.Component) componentDTO {
 		Hooks:         c.Hooks,
 		TargetContext: c.TargetContext,
 		Lifecycle:     c.Lifecycle,
+		Status: &componentStatusDTO{
+			Phase:            c.Phase,
+			BuildImageDigest: c.BuildImageDigest,
+			ErrorMessage:     c.ErrorMessage,
+		},
 	}
 }
 
@@ -169,6 +191,55 @@ func (s *Server) handleDeleteComponent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// buildTriggerResponse é o corpo JSON devolvido por POST
+// /components/{id}/build.
+type buildTriggerResponse struct {
+	ComponentID string `json:"componentId"`
+	Phase       string `json:"phase"`
+}
+
+// handleBuildComponent atende POST /components/{id}/build (E6.S2, AC1):
+// marca o Componente como Building e dispara build.Broker.Run em uma
+// goroutine, devolvendo 202 imediatamente sem esperar o build terminar. O
+// diretório de clone é criado aqui (Broker.Run exige que já exista e esteja
+// vazio) e removido ao final da goroutine; falhas do build em si (source
+// inválido, Dockerfile ausente, docker build com erro etc.) são persistidas
+// pelo próprio Broker como status.phase=Failed, observável via
+// GET /components/{id} (ver ADR 0014).
+func (s *Server) handleBuildComponent(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	component, err := s.components.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	cloneDir, err := os.MkdirTemp("", "kubeforge-build-"+component.ID+"-")
+	if err != nil {
+		slog.Error("erro ao criar diretório temporário de build", "component_id", component.ID, "error", err)
+		http.Error(w, "erro interno", http.StatusInternalServerError)
+		return
+	}
+
+	if err := s.components.UpdateBuildStatus(r.Context(), component.ID, store.PhaseBuilding, "", ""); err != nil {
+		os.RemoveAll(cloneDir)
+		writeError(w, err)
+		return
+	}
+
+	// context.Background(), não r.Context(): o build precisa continuar
+	// mesmo depois da resposta HTTP ser enviada e a requisição encerrada.
+	go func() {
+		defer os.RemoveAll(cloneDir)
+		if err := s.broker.Run(context.Background(), component, cloneDir, false); err != nil {
+			slog.Error("build assíncrona falhou", "component_id", component.ID, "error", err)
+		}
+	}()
+
+	writeJSON(w, http.StatusAccepted, buildTriggerResponse{ComponentID: component.ID, Phase: store.PhaseBuilding})
 }
 
 // statusResponse é o corpo JSON devolvido por GET /components/{id}/status.
