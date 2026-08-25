@@ -58,6 +58,182 @@ func newTestComponent(t *testing.T, components store.ComponentRepository) *store
 	return c
 }
 
+const validComponentJSON = `{
+	"nome": "componente-de-teste",
+	"source": {"repoUrl":"https://example.com/repo.git","ref":{"type":"branch","value":"main"}},
+	"resources": {"requests":{"cpu":"100m"}},
+	"runtime": {"workloadKind":"Job"},
+	"targetContext": {"cluster":"minikube"}
+}`
+
+func TestHandleCreateComponent_Sucesso(t *testing.T) {
+	server, _ := newTestServer(t, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/components", strings.NewReader(validComponentJSON))
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, corpo = %q, esperava 201", rec.Code, rec.Body.String())
+	}
+	var got componentDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("Unmarshal() error = %v, corpo = %q", err, rec.Body.String())
+	}
+	if got.ID == "" {
+		t.Errorf("componentDTO.ID vazio, esperava um id gerado")
+	}
+	if got.Nome != "componente-de-teste" {
+		t.Errorf("componentDTO.Nome = %q, esperava %q", got.Nome, "componente-de-teste")
+	}
+}
+
+func TestHandleCreateComponent_ValidacaoFalha(t *testing.T) {
+	server, _ := newTestServer(t, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/components", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, corpo = %q, esperava 400", rec.Code, rec.Body.String())
+	}
+	var got validationErrorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("Unmarshal() error = %v, corpo = %q", err, rec.Body.String())
+	}
+	wantFields := map[string]bool{"nome": true, "source": true, "resources": true, "runtime": true, "targetContext": true}
+	gotFields := map[string]bool{}
+	for _, f := range got.Errors {
+		gotFields[f.Field] = true
+	}
+	for field := range wantFields {
+		if !gotFields[field] {
+			t.Errorf("validationErrorResponse.Errors = %+v, esperava violação em %q", got.Errors, field)
+		}
+	}
+}
+
+func TestHandleCreateComponent_JSONInvalido(t *testing.T) {
+	server, _ := newTestServer(t, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/components", strings.NewReader(`{`))
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, corpo = %q, esperava 400", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleListComponents_Vazio(t *testing.T) {
+	server, _ := newTestServer(t, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/components", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, corpo = %q, esperava 200", rec.Code, rec.Body.String())
+	}
+	var got []componentDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("Unmarshal() error = %v, corpo = %q", err, rec.Body.String())
+	}
+	if len(got) != 0 {
+		t.Fatalf("componentes = %+v, esperava lista vazia", got)
+	}
+}
+
+func TestHandleListComponents_ComItens(t *testing.T) {
+	server, components := newTestServer(t, nil)
+	c1 := newTestComponent(t, components)
+	c2 := newTestComponent(t, components)
+
+	req := httptest.NewRequest(http.MethodGet, "/components", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, corpo = %q, esperava 200", rec.Code, rec.Body.String())
+	}
+	var got []componentDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("Unmarshal() error = %v, corpo = %q", err, rec.Body.String())
+	}
+	if len(got) != 2 {
+		t.Fatalf("componentes = %+v, esperava 2 itens", got)
+	}
+	ids := map[string]bool{got[0].ID: true, got[1].ID: true}
+	if !ids[c1.ID] || !ids[c2.ID] {
+		t.Errorf("ids devolvidos = %v, esperava conter %q e %q", ids, c1.ID, c2.ID)
+	}
+}
+
+func TestHandleGetComponent_Sucesso(t *testing.T) {
+	server, components := newTestServer(t, nil)
+	component := newTestComponent(t, components)
+
+	req := httptest.NewRequest(http.MethodGet, "/components/"+component.ID, nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, corpo = %q, esperava 200", rec.Code, rec.Body.String())
+	}
+	var got componentDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("Unmarshal() error = %v, corpo = %q", err, rec.Body.String())
+	}
+	if got.ID != component.ID || got.Nome != component.Nome {
+		t.Errorf("componentDTO = %+v, esperava ID=%q Nome=%q", got, component.ID, component.Nome)
+	}
+}
+
+func TestHandleGetComponent_NaoEncontrado(t *testing.T) {
+	server, _ := newTestServer(t, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/components/id-inexistente", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, esperava 404", rec.Code)
+	}
+}
+
+func TestHandleDeleteComponent_Sucesso(t *testing.T) {
+	server, components := newTestServer(t, nil)
+	component := newTestComponent(t, components)
+
+	req := httptest.NewRequest(http.MethodDelete, "/components/"+component.ID, nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, corpo = %q, esperava 204", rec.Code, rec.Body.String())
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/components/"+component.ID, nil)
+	getRec := httptest.NewRecorder()
+	server.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusNotFound {
+		t.Fatalf("GET pós-delete status = %d, esperava 404 (componente deveria ter sido removido)", getRec.Code)
+	}
+}
+
+func TestHandleDeleteComponent_NaoEncontrado(t *testing.T) {
+	server, _ := newTestServer(t, nil)
+
+	req := httptest.NewRequest(http.MethodDelete, "/components/id-inexistente", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, esperava 404", rec.Code)
+	}
+}
+
 func newJobPod(name, namespace, jobName string, phase corev1.PodPhase) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{

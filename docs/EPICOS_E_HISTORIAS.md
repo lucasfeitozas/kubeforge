@@ -193,8 +193,8 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E6.S1 — Endpoints CRUD de Componente
 **Como** usuário, **quero** endpoints REST para criar, listar, obter e remover Componentes, **para** gerenciá-los sem editar YAML manualmente.
 - Critérios de aceite:
-  - [ ] `POST /components`, `GET /components`, `GET /components/{id}`, `DELETE /components/{id}`
-  - [ ] Respostas em JSON seguindo o schema da seção 2.2
+  - [x] `POST /components`, `GET /components`, `GET /components/{id}`, `DELETE /components/{id}`
+  - [x] Respostas em JSON seguindo o schema da seção 2.2 (`componentDTO` em `internal/api/server.go` — ver ADR 0013)
 - Prioridade: alta
 
 ### E6.S2 — Endpoint de ação "Build"

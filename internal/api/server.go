@@ -13,10 +13,11 @@ import (
 	"github.com/lucasfeitozas/kubeforge/internal/store"
 )
 
-// Server expõe via HTTP o acompanhamento de status e logs de um Componente
-// em execução (E4.S4), e o cleanup --all (E5.S2) sobre o cluster resolvido
-// por ClusterProvider — a primeira fatia da API descrita em doc.go; CRUD de
-// Componente e a ação build/run continuam fora do escopo desta história.
+// Server expõe via HTTP o CRUD de Componente (E6.S1), o acompanhamento de
+// status e logs de um Componente em execução (E4.S4), e o cleanup --all
+// (E5.S2) sobre o cluster resolvido por ClusterProvider — as ações
+// build/run sob demanda (E6.S2/E6.S3) continuam fora do escopo desta
+// história.
 type Server struct {
 	mux          *http.ServeMux
 	components   store.ComponentRepository
@@ -40,6 +41,10 @@ func NewServer(components store.ComponentRepository, clusters k8s.ClusterProvide
 		clusters:     clusters,
 		cleanupAudit: cleanupAudit,
 	}
+	s.mux.HandleFunc("POST /components", s.handleCreateComponent)
+	s.mux.HandleFunc("GET /components", s.handleListComponents)
+	s.mux.HandleFunc("GET /components/{id}", s.handleGetComponent)
+	s.mux.HandleFunc("DELETE /components/{id}", s.handleDeleteComponent)
 	s.mux.HandleFunc("GET /components/{id}/status", s.handleStatus)
 	s.mux.HandleFunc("GET /components/{id}/logs", s.handleLogs)
 	s.mux.HandleFunc("POST /cleanup", s.handleCleanup)
@@ -50,6 +55,120 @@ func NewServer(components store.ComponentRepository, clusters k8s.ClusterProvide
 // como Handler de um http.Server (ver cmd/kubeforge/main.go).
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
+}
+
+// componentDTO é o corpo JSON de requisição/resposta do CRUD de Componente
+// (POST/GET/DELETE /components), espelhando exatamente o schema
+// "Componente" da seção 2.2 de docs/ARCHITECTURE.md — sem os campos de
+// status (phase, buildImageDigest, errorMessage, createdAt, updatedAt), que
+// pertencem à camada de status/CRD e já são expostos por
+// GET /components/{id}/status (ver ADR 0013).
+type componentDTO struct {
+	ID            string          `json:"id,omitempty"`
+	Nome          string          `json:"nome"`
+	Descricao     string          `json:"descricao,omitempty"`
+	Source        json.RawMessage `json:"source,omitempty"`
+	Build         json.RawMessage `json:"build,omitempty"`
+	Resources     json.RawMessage `json:"resources,omitempty"`
+	Runtime       json.RawMessage `json:"runtime,omitempty"`
+	Hooks         json.RawMessage `json:"hooks,omitempty"`
+	TargetContext json.RawMessage `json:"targetContext,omitempty"`
+	Lifecycle     json.RawMessage `json:"lifecycle,omitempty"`
+}
+
+func componentToDTO(c *store.Component) componentDTO {
+	return componentDTO{
+		ID:            c.ID,
+		Nome:          c.Nome,
+		Descricao:     c.Descricao,
+		Source:        c.Source,
+		Build:         c.Build,
+		Resources:     c.Resources,
+		Runtime:       c.Runtime,
+		Hooks:         c.Hooks,
+		TargetContext: c.TargetContext,
+		Lifecycle:     c.Lifecycle,
+	}
+}
+
+// toComponent converte o DTO recebido no corpo de POST /components para
+// store.Component; ID é ignorado (o repository o gera em Create).
+func (dto componentDTO) toComponent() *store.Component {
+	return &store.Component{
+		Nome:          dto.Nome,
+		Descricao:     dto.Descricao,
+		Source:        dto.Source,
+		Build:         dto.Build,
+		Resources:     dto.Resources,
+		Runtime:       dto.Runtime,
+		Hooks:         dto.Hooks,
+		TargetContext: dto.TargetContext,
+		Lifecycle:     dto.Lifecycle,
+	}
+}
+
+// handleCreateComponent atende POST /components (E6.S1, AC1). O corpo é
+// decodificado e delegado a store.Component.Validate (via
+// ComponentRepository.Create); falhas de validação viram 400 através de
+// writeError/*store.ValidationError.
+func (s *Server) handleCreateComponent(w http.ResponseWriter, r *http.Request) {
+	var dto componentDTO
+	if err := json.NewDecoder(r.Body).Decode(&dto); err != nil {
+		http.Error(w, fmt.Sprintf("corpo da requisição inválido: %s", err), http.StatusBadRequest)
+		return
+	}
+
+	c := dto.toComponent()
+	if err := s.components.Create(r.Context(), c); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, componentToDTO(c))
+}
+
+// handleListComponents atende GET /components, devolvendo um array JSON
+// (nunca null, mesmo vazio — ver store.ComponentRepository.List).
+func (s *Server) handleListComponents(w http.ResponseWriter, r *http.Request) {
+	components, err := s.components.List(r.Context())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	dtos := make([]componentDTO, len(components))
+	for i, c := range components {
+		dtos[i] = componentToDTO(c)
+	}
+	writeJSON(w, http.StatusOK, dtos)
+}
+
+// handleGetComponent atende GET /components/{id}.
+func (s *Server) handleGetComponent(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	c, err := s.components.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, componentToDTO(c))
+}
+
+// handleDeleteComponent atende DELETE /components/{id}. Se houver execuções
+// referenciando o componente (ON DELETE RESTRICT), o erro de driver SQL cru
+// cai no case default de writeError (500) — limitação aceita, sem
+// precedente hoje no projeto para mapear FK-restrict a 409 (ver ADR 0013).
+func (s *Server) handleDeleteComponent(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	if err := s.components.Delete(r.Context(), id); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // statusResponse é o corpo JSON devolvido por GET /components/{id}/status.
@@ -197,12 +316,32 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
-// writeError mapeia erros de domínio conhecidos (componente/pod não
-// encontrado) para 404; qualquer outro erro (targetContext inválido,
-// cluster inacessível etc.) vira 500, com o detalhe apenas logado — não
-// exposto ao cliente.
+// validationErrorResponse é o corpo JSON devolvido quando POST /components
+// falha a validação de store.Component.Validate (400), listando todos os
+// campos inválidos de uma vez (fail-slow, não fail-fast).
+type validationErrorResponse struct {
+	Errors []fieldErrorDTO `json:"errors"`
+}
+
+type fieldErrorDTO struct {
+	Field   string `json:"field"`
+	Message string `json:"message"`
+}
+
+// writeError mapeia erros de domínio conhecidos para o status HTTP
+// correspondente: violação de validação de Componente vira 400 com o
+// detalhe por campo, componente/pod não encontrado vira 404; qualquer outro
+// erro (targetContext inválido, cluster inacessível etc.) vira 500, com o
+// detalhe apenas logado — não exposto ao cliente.
 func writeError(w http.ResponseWriter, err error) {
+	var verr *store.ValidationError
 	switch {
+	case errors.As(err, &verr):
+		fields := make([]fieldErrorDTO, len(verr.Fields))
+		for i, f := range verr.Fields {
+			fields[i] = fieldErrorDTO{Field: f.Field, Message: f.Message}
+		}
+		writeJSON(w, http.StatusBadRequest, validationErrorResponse{Errors: fields})
 	case errors.Is(err, store.ErrComponentNotFound):
 		http.Error(w, err.Error(), http.StatusNotFound)
 	case errors.Is(err, controller.ErrPodNotFound):
