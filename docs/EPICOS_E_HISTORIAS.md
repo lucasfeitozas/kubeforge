@@ -200,8 +200,8 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E6.S2 — Endpoint de ação "Build"
 **Como** usuário, **quero** `POST /components/{id}/build` para disparar o Build Broker, **para** buildar a imagem sob demanda.
 - Critérios de aceite:
-  - [ ] Retorna imediatamente com `status=Building`; build roda de forma assíncrona (goroutine)
-  - [ ] Endpoint de consulta de status reflete o progresso
+  - [x] Retorna imediatamente com `status=Building`; build roda de forma assíncrona (goroutine)
+  - [x] Endpoint de consulta de status reflete o progresso (`status` em `componentDTO`, `GET /components/{id}` — ver ADR 0014)
 - Prioridade: alta
 
 ### E6.S3 — Endpoint de ação "Run" e "Cleanup"
