@@ -7,8 +7,8 @@
 
   var NAV_ITEMS = [
     { href: "/", label: "Início", icon: "🏠" },
+    { href: "/componentes/index.html", label: "Componentes", icon: "📦" },
     { href: "/componentes/novo.html", label: "Novo Componente", icon: "➕" },
-    // E7.S3: link "Componentes" (listagem) aqui.
   ];
 
   function currentPath() {

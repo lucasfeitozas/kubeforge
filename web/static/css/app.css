@@ -39,14 +39,17 @@ body {
 
 /* !important: sobrepõe a variável --bs-link-color do Bootstrap, que tem
    precedência sobre um seletor de mesma especificidade só por vir depois
-   na cascata interna do framework. */
+   na cascata interna do framework. :not(.btn) exclui âncoras estilizadas
+   como botão (ex.: <a class="btn btn-primary">) — sem isso, esta regra
+   pintava o texto do botão com a mesma cor do próprio fundo roxo
+   (--kf-accent), tornando o texto ilegível (E7.S3). */
 .btn-link,
-a {
+a:not(.btn) {
   color: var(--kf-accent) !important;
 }
 
 .btn-link:hover,
-a:hover {
+a:not(.btn):hover {
   color: #6d28d9 !important;
 }
 
@@ -157,6 +160,12 @@ a:hover {
 
 .kf-card .card-body {
   padding: 1.25rem;
+}
+
+/* badge bg-light (fase CleanedUp, E7.S3) some contra --kf-bg sem uma borda
+   para dar contraste — as demais cores de badge já contrastam sozinhas. */
+.badge.bg-light {
+  border: 1px solid var(--kf-border);
 }
 
 /* Sidebar collapsed (desktop toggle) */
