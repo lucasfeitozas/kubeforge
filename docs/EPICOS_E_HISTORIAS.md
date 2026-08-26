@@ -241,8 +241,8 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E7.S3 — Tela de listagem e acompanhamento
 **Como** usuário, **quero** ver a lista de Componentes com seu `status.phase` atual, **para** acompanhar builds e execuções em andamento.
 - Critérios de aceite:
-  - [ ] Lista com badge de status (`Pending/Building/Built/Running/Succeeded/Failed/CleanedUp`)
-  - [ ] Botões de ação: Build, Run, Cleanup
+  - [x] Lista com badge de status (`Pending/Building/Built/Running/Succeeded/Failed/CleanedUp`) — `web/static/componentes/index.html`, ver ADR 0020
+  - [x] Botões de ação: Build, Run, Cleanup — `web/static/js/componente-lista.js`
 - Prioridade: média
 
 ### E7.S4 — Tela de logs em tempo real
