@@ -234,8 +234,8 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E7.S2 — Tela de cadastro de Componente
 **Como** usuário, **quero** um formulário simples para preencher `source`, `resources`, `runtime` e `lifecycle`, **para** cadastrar Componentes sem escrever JSON manualmente.
 - Critérios de aceite:
-  - [ ] Formulário cobre os campos obrigatórios do schema (seção 2.2)
-  - [ ] Validação client-side básica antes do submit
+  - [x] Formulário cobre os campos obrigatórios do schema (seção 2.2) — `web/static/componentes/novo.html`, ver ADR 0019
+  - [x] Validação client-side básica antes do submit
 - Prioridade: média
 
 ### E7.S3 — Tela de listagem e acompanhamento
