@@ -168,6 +168,29 @@ a:not(.btn):hover {
   border: 1px solid var(--kf-border);
 }
 
+/* Tela de logs (E7.S4, ADR 0021). .kf-log-viewer usa uma altura fixa via
+   calc(100vh - ...), não flex-grow: o shell (#app-shell/.kf-main/
+   .kf-page-content, todos com min-height, não height) não forma uma
+   cadeia de altura limitada até aqui, então um item flex sem altura
+   própria só cresceria com o conteúdo (o padrão flex-basis:auto some com
+   o min-height:auto default do item) — o scroll aconteceria na página
+   inteira, não dentro da caixa de log, e o auto-scroll interno nunca
+   entraria em ação. */
+
+.kf-log-viewer {
+  height: calc(100vh - 14rem);
+  background-color: #1a1d23;
+  color: #e5e7eb;
+  border-radius: 0.75rem;
+  padding: 1rem 1.25rem;
+  margin: 0;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.875rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* Sidebar collapsed (desktop toggle) */
 
 #app-shell.kf-collapsed .kf-sidebar {
