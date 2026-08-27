@@ -248,8 +248,8 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E7.S4 — Tela de logs em tempo real
 **Como** usuário, **quero** visualizar os logs da execução atual de um Componente, **para** depurar sem abrir terminal.
 - Critérios de aceite:
-  - [ ] Consome o endpoint de streaming de logs (E6.S4)
-  - [ ] Auto-scroll com opção de pausar
+  - [x] Consome o endpoint de streaming de logs (E6.S4) — `EventSource` em `GET /components/{id}/logs?follow=true`, `web/static/js/componente-logs.js`, ver ADR 0021
+  - [x] Auto-scroll com opção de pausar — `web/static/componentes/logs.html`
 - Prioridade: baixa
 
 ---

@@ -1,7 +1,8 @@
 // Listagem de Componentes com status e ações (E7.S3, ADR 0020): busca
 // GET /components periodicamente e renderiza uma linha por Componente, com
-// badge de status.phase e botões Build/Run/Cleanup ligados aos endpoints
-// POST /components/{id}/build|run|cleanup.
+// badge de status.phase, botões Build/Run/Cleanup ligados aos endpoints
+// POST /components/{id}/build|run|cleanup e um link Logs para a tela de
+// logs em tempo real (E7.S4, ADR 0021).
 (function () {
   "use strict";
 
@@ -132,6 +133,9 @@
 
       var runButton = tr.querySelector('[data-action="run"]');
       runButton.disabled = phase !== "Built";
+
+      var logsLink = tr.querySelector('[data-link="logs"]');
+      logsLink.href = "/componentes/logs.html?id=" + encodeURIComponent(component.id);
     }
 
     // --- Estado de "ocupado" por linha (independente entre linhas) ---
@@ -166,7 +170,7 @@
               // imediatamente; cleanup não tem "phase" nesse corpo — nesse
               // caso o refreshList() logo abaixo é quem traz o estado real.
               if (body && body.phase) {
-                fillRow(tr, { nome: tr.querySelector('[data-col="nome"]').textContent, descricao: "", status: { phase: body.phase } });
+                fillRow(tr, { id: id, nome: tr.querySelector('[data-col="nome"]').textContent, descricao: "", status: { phase: body.phase } });
               }
             });
           }
