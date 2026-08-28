@@ -94,21 +94,21 @@ func (s *Server) handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, openAPISpecYAML)
 }
 
-// swaggerUIHTML carrega o bundle do Swagger UI via CDN (unpkg), apontando
-// para GET /openapi.yaml — sem dependência Go nova nem asset vendorizado no
-// repositório (ver ADR 0017). Só exige internet para abrir a página; os
-// demais endpoints da API continuam 100% locais.
+// swaggerUIHTML carrega o bundle do Swagger UI vendorizado em
+// web/static/vendor/swagger-ui/ (servido via web.StaticFS, ver ADR 0022 —
+// supera a decisão por CDN da ADR 0017), apontando para GET /openapi.yaml.
+// A página e os demais endpoints da API agora são 100% locais.
 const swaggerUIHTML = `<!DOCTYPE html>
 <html lang="pt-br">
 <head>
   <meta charset="UTF-8">
   <title>KubeForge API — Swagger UI</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <link rel="stylesheet" href="/vendor/swagger-ui/swagger-ui.css">
 </head>
 <body>
   <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+  <script src="/vendor/swagger-ui/swagger-ui-bundle.js"></script>
+  <script src="/vendor/swagger-ui/swagger-ui-standalone-preset.js"></script>
   <script>
     window.onload = function() {
       window.ui = SwaggerUIBundle({

@@ -33,6 +33,13 @@ dashboard compartilhado sem introduzir build step.
 
 ### Bootstrap 5 via CDN, não vendorizado
 
+> **Superada pela [ADR 0022](0022-vendorizar-bootstrap-e-swagger-ui.md)**:
+> `cdn.jsdelivr.net` ficou inalcançável numa rede real, travando o
+> carregamento de **todas** as páginas do Console (não só degradando o
+> visual) — o trade-off "exige internet" aceito abaixo se provou maior do
+> que previsto. Bootstrap passou a ser vendorizado em
+> `web/static/vendor/bootstrap/`.
+
 `web/static/*.html` carrega Bootstrap 5 (CSS + JS bundle) via `<link>`/
 `<script>` apontando para o CDN oficial (`cdn.jsdelivr.net`), em vez de
 vendorizar os arquivos no repositório ou introduzir um pipeline npm/asset
