@@ -5,6 +5,7 @@ go 1.23.0
 require (
 	github.com/golang-migrate/migrate/v4 v4.18.3
 	github.com/google/uuid v1.6.0
+	github.com/joho/godotenv v1.5.1
 	k8s.io/api v0.32.13
 	k8s.io/apiextensions-apiserver v0.32.13
 	k8s.io/apimachinery v0.32.13

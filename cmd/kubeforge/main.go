@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
+
 	"github.com/lucasfeitozas/kubeforge/internal/api"
 	"github.com/lucasfeitozas/kubeforge/internal/build"
 	"github.com/lucasfeitozas/kubeforge/internal/controller"
@@ -30,6 +32,7 @@ type config struct {
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, nil)))
+	loadDotenv()
 
 	if len(os.Args) > 1 && os.Args[1] == "cleanup" {
 		runCleanup(os.Args[2:])
@@ -129,6 +132,18 @@ func runServer() {
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		slog.Error("erro ao desligar servidor HTTP", "error", err)
 		os.Exit(1)
+	}
+}
+
+// loadDotenv carrega variáveis de um arquivo .env no diretório atual para o
+// ambiente do processo, se ele existir — conveniência local para não exigir
+// export manual das KUBEFORGE_* antes de rodar o binário (docs/ARCHITECTURE.md
+// §7, perfil 100% local). godotenv.Load não sobrescreve uma env var já
+// definida no processo (ex.: setada explicitamente no shell), então .env só
+// preenche o que ainda não foi definido. A ausência do arquivo não é um erro.
+func loadDotenv() {
+	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
+		slog.Warn("falha ao carregar .env", "error", err)
 	}
 }
 
