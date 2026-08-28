@@ -88,6 +88,16 @@ func (b *DockerBuilder) Build(ctx context.Context, spec BuildSpec) (*BuildResult
 	if err != nil {
 		return nil, fmt.Errorf("resolvendo env vars do docker-env: %w", err)
 	}
+	// KUBEFORGE_DOCKER_API_VERSION força DOCKER_API_VERSION só neste `docker
+	// build` (não em os.Environ() globalmente, nem no `minikube docker-env`
+	// chamado acima): o CLI docker do host e o daemon interno do Minikube
+	// podem exigir versões de API diferentes (CLI antigo x Minikube recente),
+	// mas o Docker Desktop que hospeda o próprio container "minikube" pode
+	// aceitar só uma versão mais antiga — setar DOCKER_API_VERSION no
+	// processo inteiro quebraria essa segunda chamada.
+	if v, ok := os.LookupEnv("KUBEFORGE_DOCKER_API_VERSION"); ok && v != "" {
+		dockerEnv["DOCKER_API_VERSION"] = v
+	}
 
 	buildContext := filepath.Dir(spec.CloneResult.DockerfilePath)
 	args := []string{"build"}

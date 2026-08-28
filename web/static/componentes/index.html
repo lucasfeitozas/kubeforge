@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Componentes — KubeForge Console</title>
+  <link rel="stylesheet" href="/vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <div id="app-shell" style="visibility:hidden">
+    <main id="page-content">
+      <div class="container-fluid" style="max-width: 1140px;">
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+          <div>
+            <h1 class="h3 mb-1">Componentes</h1>
+            <p class="text-body-secondary mb-0">Acompanhe builds e execuções em andamento.</p>
+          </div>
+          <div class="d-flex gap-2">
+            <button id="refresh-list" type="button" class="btn btn-outline-secondary">↻ Atualizar</button>
+            <a href="/componentes/novo.html" class="btn btn-primary">+ Novo Componente</a>
+          </div>
+        </div>
+
+        <div id="list-error-alert" class="alert alert-danger d-none" role="alert"></div>
+
+        <div class="card kf-card">
+          <div class="card-body p-0">
+            <div class="table-responsive">
+              <table class="table align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Nome</th>
+                    <th>Descrição</th>
+                    <th>Status</th>
+                    <th>Detalhe</th>
+                    <th class="text-end">Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="componentes-tbody"></tbody>
+              </table>
+            </div>
+            <div id="empty-state" class="text-center text-body-secondary py-5 d-none">
+              Nenhum componente cadastrado ainda.
+              <a href="/componentes/novo.html">Cadastre o primeiro</a>.
+            </div>
+            <div id="loading-state" class="text-center text-body-secondary py-5">
+              Carregando...
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <template id="componente-row-template">
+    <tr>
+      <td class="fw-semibold" data-col="nome"></td>
+      <td class="text-body-secondary" data-col="descricao"></td>
+      <td><span class="badge" data-col="badge"></span></td>
+      <td class="small" data-col="detalhe"></td>
+      <td class="text-end">
+        <div data-col="row-error" class="text-danger small mb-1 d-none"></div>
+        <div class="btn-group btn-group-sm" role="group">
+          <button type="button" class="btn btn-outline-primary" data-action="build">Build</button>
+          <button type="button" class="btn btn-outline-primary" data-action="run">Run</button>
+          <button type="button" class="btn btn-outline-danger" data-action="cleanup">Cleanup</button>
+          <a href="#" class="btn btn-outline-secondary" data-link="logs">Logs</a>
+        </div>
+      </td>
+    </tr>
+  </template>
+
+  <script src="/vendor/bootstrap/bootstrap.bundle.min.js"></script>
+  <script src="/js/layout.js" defer></script>
+  <script src="/js/componente-lista.js" defer></script>
+</body>
+</html>

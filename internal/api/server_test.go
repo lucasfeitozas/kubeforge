@@ -14,6 +14,7 @@ import (
 	"github.com/lucasfeitozas/kubeforge/internal/build"
 	"github.com/lucasfeitozas/kubeforge/internal/controller"
 	"github.com/lucasfeitozas/kubeforge/internal/store"
+	"github.com/lucasfeitozas/kubeforge/web"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -57,7 +58,7 @@ func newTestServer(t *testing.T, clientset kubernetes.Interface) (*Server, store
 		Components:      components,
 		Executions:      executions,
 	}
-	server := NewServer(components, stubClusterProvider{clientset: clientset}, store.NewCleanupAuditRepository(db), broker, runner)
+	server := NewServer(components, stubClusterProvider{clientset: clientset}, store.NewCleanupAuditRepository(db), broker, runner, web.StaticFS())
 	return server, components
 }
 
@@ -732,7 +733,7 @@ func TestHandleLogs_Follow_StreamAteHttptestServer(t *testing.T) {
 		Components:      components,
 		Executions:      executions,
 	}
-	server := NewServer(components, stubClusterProvider{clientset: clientset}, store.NewCleanupAuditRepository(db), broker, runner)
+	server := NewServer(components, stubClusterProvider{clientset: clientset}, store.NewCleanupAuditRepository(db), broker, runner, web.StaticFS())
 	httpSrv := httptest.NewServer(server)
 	t.Cleanup(httpSrv.Close)
 
@@ -802,5 +803,35 @@ func TestHandleSwaggerUI_Sucesso(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `url: "/openapi.yaml"`) {
 		t.Errorf("corpo não aponta o Swagger UI para /openapi.yaml: %q", rec.Body.String())
+	}
+}
+
+func TestHandleStaticAssets_ServeIndexHTML(t *testing.T) {
+	server, _ := newTestServer(t, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, corpo = %q, esperava 200", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("Content-Type = %q, esperava começar com text/html", ct)
+	}
+	if !strings.Contains(rec.Body.String(), "KubeForge") {
+		t.Errorf("corpo não parece o index.html do Console: %q", rec.Body.String())
+	}
+}
+
+func TestHandleStaticAssets_404ParaCaminhoInexistente(t *testing.T) {
+	server, _ := newTestServer(t, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/nao-existe.js", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, esperava 404", rec.Code)
 	}
 }

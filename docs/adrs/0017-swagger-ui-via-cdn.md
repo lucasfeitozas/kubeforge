@@ -54,6 +54,14 @@ stdlib genuinamente não resolve, e aqui o ganho não compensa o peso.
 
 ### UI via CDN (unpkg), não vendorizada manualmente
 
+> **Superada pela [ADR 0022](0022-vendorizar-bootstrap-e-swagger-ui.md)**:
+> o trade-off aceito abaixo ("exige internet para carregar a UI") se
+> provou pior na prática do que previsto — `unpkg.com` ficou
+> completamente inalcançável numa rede real, travando `/swagger/` por
+> completo, não só degradando-a. Os 3 arquivos passaram a ser
+> vendorizados em `web/static/vendor/swagger-ui/`, buscados via tarball
+> do registry npm (resolvendo a objeção de checksum/integridade abaixo).
+
 Diante disso, a escolha foi carregar os assets do Swagger UI
 (`swagger-ui-bundle.js`, `swagger-ui-standalone-preset.js`,
 `swagger-ui.css`) via CDN (`unpkg.com/swagger-ui-dist@5`) numa página HTML

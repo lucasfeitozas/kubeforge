@@ -227,29 +227,29 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E7.S1 — Servidor de arquivos estáticos embutido
 **Como** desenvolvedor, **quero** servir os assets de `web/static` via `embed.FS` no próprio binário, **para** não depender de Nginx ou build step separado no MVP.
 - Critérios de aceite:
-  - [ ] `go:embed` configurado em `cmd/kubeforge`
-  - [ ] Console acessível em `http://localhost:8080`
+  - [x] `go:embed` configurado em `cmd/kubeforge` (pacote `web`, importado e conectado em `cmd/kubeforge/main.go` — ver ADR 0018)
+  - [x] Console acessível em `http://localhost:8080` (`web/static/index.html`, placeholder — UI real em E7.S2-S4)
 - Prioridade: média
 
 ### E7.S2 — Tela de cadastro de Componente
 **Como** usuário, **quero** um formulário simples para preencher `source`, `resources`, `runtime` e `lifecycle`, **para** cadastrar Componentes sem escrever JSON manualmente.
 - Critérios de aceite:
-  - [ ] Formulário cobre os campos obrigatórios do schema (seção 2.2)
-  - [ ] Validação client-side básica antes do submit
+  - [x] Formulário cobre os campos obrigatórios do schema (seção 2.2) — `web/static/componentes/novo.html`, ver ADR 0019
+  - [x] Validação client-side básica antes do submit
 - Prioridade: média
 
 ### E7.S3 — Tela de listagem e acompanhamento
 **Como** usuário, **quero** ver a lista de Componentes com seu `status.phase` atual, **para** acompanhar builds e execuções em andamento.
 - Critérios de aceite:
-  - [ ] Lista com badge de status (`Pending/Building/Built/Running/Succeeded/Failed/CleanedUp`)
-  - [ ] Botões de ação: Build, Run, Cleanup
+  - [x] Lista com badge de status (`Pending/Building/Built/Running/Succeeded/Failed/CleanedUp`) — `web/static/componentes/index.html`, ver ADR 0020
+  - [x] Botões de ação: Build, Run, Cleanup — `web/static/js/componente-lista.js`
 - Prioridade: média
 
 ### E7.S4 — Tela de logs em tempo real
 **Como** usuário, **quero** visualizar os logs da execução atual de um Componente, **para** depurar sem abrir terminal.
 - Critérios de aceite:
-  - [ ] Consome o endpoint de streaming de logs (E6.S4)
-  - [ ] Auto-scroll com opção de pausar
+  - [x] Consome o endpoint de streaming de logs (E6.S4) — `EventSource` em `GET /components/{id}/logs?follow=true`, `web/static/js/componente-logs.js`, ver ADR 0021
+  - [x] Auto-scroll com opção de pausar — `web/static/componentes/logs.html`
 - Prioridade: baixa
 
 ---

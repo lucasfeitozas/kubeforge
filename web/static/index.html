@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KubeForge Console</title>
+  <link rel="stylesheet" href="/vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <div id="app-shell" style="visibility:hidden">
+    <main id="page-content">
+      <div class="container-fluid" style="max-width: 960px;">
+        <h1 class="h3 mb-1">KubeForge Console</h1>
+        <p class="text-body-secondary mb-4">
+          Servido pelo próprio binário via <code>embed.FS</code> (E7.S1) — sem
+          Nginx nem build step separado.
+        </p>
+
+        <div class="card kf-card mb-4">
+          <div class="card-body text-center py-5">
+            <p class="mb-3">
+              Acompanhe seus Componentes cadastrados.
+            </p>
+            <div class="d-flex gap-2 justify-content-center">
+              <a href="/componentes/index.html" class="btn btn-primary">
+                Ver Componentes
+              </a>
+              <a href="/componentes/novo.html" class="btn btn-outline-secondary">
+                + Novo Componente
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <p class="text-body-secondary small">
+          Acompanhe os logs de uma execução em tempo real a partir da
+          listagem de Componentes. Explore também a API em
+          <a href="/swagger/">/swagger/</a>.
+        </p>
+      </div>
+    </main>
+  </div>
+
+  <script src="/vendor/bootstrap/bootstrap.bundle.min.js"></script>
+  <script src="/js/layout.js" defer></script>
+</body>
+</html>

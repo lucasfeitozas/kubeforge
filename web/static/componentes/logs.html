@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Logs — KubeForge Console</title>
+  <link rel="stylesheet" href="/vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <div id="app-shell" style="visibility:hidden">
+    <main id="page-content">
+      <div class="container-fluid">
+        <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
+          <div>
+            <a href="/componentes/index.html" class="d-inline-block mb-1">← Voltar para Componentes</a>
+            <h1 class="h3 mb-1" id="componente-nome">Logs</h1>
+            <p class="text-body-secondary mb-0">
+              Fase atual: <span id="componente-fase">—</span>
+            </p>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <span id="connection-status" class="text-body-secondary small">Conectando…</span>
+            <button id="toggle-autoscroll" type="button" class="btn btn-outline-secondary btn-sm">Pausar auto-scroll</button>
+            <button id="reconnect" type="button" class="btn btn-outline-primary btn-sm d-none">Reconectar</button>
+          </div>
+        </div>
+
+        <div id="header-error-alert" class="alert alert-danger d-none" role="alert"></div>
+
+        <pre id="log-viewer" class="kf-log-viewer" aria-live="polite"><span id="log-empty-state" class="text-body-secondary">Nenhum log ainda.</span></pre>
+      </div>
+    </main>
+  </div>
+
+  <script src="/vendor/bootstrap/bootstrap.bundle.min.js"></script>
+  <script src="/js/layout.js" defer></script>
+  <script src="/js/componente-logs.js" defer></script>
+</body>
+</html>
