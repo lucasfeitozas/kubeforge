@@ -261,7 +261,7 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E8.S1 — Endpoint de status/health do binário
 **Como** usuário, **quero** `GET /status` retornando saúde da conexão com o Minikube e com o SQLite, **para** diagnosticar problemas rapidamente.
 - Critérios de aceite:
-  - [ ] Retorna versão do cluster, caminho do DB, uptime do processo
+  - [x] Retorna versão do cluster, caminho do DB, uptime do processo
 - Prioridade: baixa
 
 ### E8.S2 — Logs estruturados do binário

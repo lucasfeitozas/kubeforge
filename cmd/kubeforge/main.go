@@ -98,7 +98,7 @@ func runServer() {
 		Executions:      executions,
 	}
 
-	apiServer := api.NewServer(components, provider, store.NewCleanupAuditRepository(db), broker, runner, web.StaticFS())
+	apiServer := api.NewServer(components, provider, store.NewCleanupAuditRepository(db), broker, runner, db, cfg.dbPath, web.StaticFS())
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.httpPort),
 		Handler: apiServer,

@@ -15,6 +15,8 @@ tags:
     description: CRUD e ações sob demanda (build/run/cleanup) de um Componente
   - name: cleanup
     description: Remoção de recursos gerenciados no cluster
+  - name: status
+    description: Saúde do próprio binário KubeForge (E8.S1)
 
 paths:
   /components:
@@ -237,6 +239,30 @@ paths:
               schema:
                 $ref: "#/components/schemas/CleanupResponse"
 
+  /status:
+    get:
+      tags: [status]
+      summary: Saúde do binário — conexão com o Minikube e com o SQLite, uptime do processo
+      description: >-
+        Distinto de GET /components/{id}/status (status do Pod de um
+        Componente). Devolve 503 se qualquer uma das duas dependências
+        estiver indisponível, para permitir uso direto como healthcheck
+        (ver ADR 0023).
+      operationId: getAppStatus
+      responses:
+        "200":
+          description: Cluster e banco saudáveis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppStatus"
+        "503":
+          description: Cluster e/ou banco indisponível — ver campo error de cada seção
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppStatus"
+
 components:
   parameters:
     ComponentId:
@@ -278,6 +304,31 @@ components:
           type: string
         message:
           type: string
+
+    AppStatus:
+      type: object
+      properties:
+        uptimeSeconds:
+          type: number
+          format: double
+        cluster:
+          type: object
+          properties:
+            healthy:
+              type: boolean
+            kubernetesVersion:
+              type: string
+            error:
+              type: string
+        database:
+          type: object
+          properties:
+            healthy:
+              type: boolean
+            path:
+              type: string
+            error:
+              type: string
 
     CleanupResponse:
       type: object
