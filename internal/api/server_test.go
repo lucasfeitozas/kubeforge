@@ -58,7 +58,7 @@ func newTestServer(t *testing.T, clientset kubernetes.Interface) (*Server, store
 		Components:      components,
 		Executions:      executions,
 	}
-	server := NewServer(components, stubClusterProvider{clientset: clientset}, store.NewCleanupAuditRepository(db), broker, runner, web.StaticFS())
+	server := NewServer(components, stubClusterProvider{clientset: clientset}, store.NewCleanupAuditRepository(db), broker, runner, db, ":memory:", web.StaticFS())
 	return server, components
 }
 
@@ -551,6 +551,104 @@ func TestHandleStatus_JobAindaNaoAplicado(t *testing.T) {
 	}
 }
 
+func TestHandleAppStatus_Saudavel(t *testing.T) {
+	server, _ := newTestServer(t, fake.NewSimpleClientset())
+
+	req := httptest.NewRequest(http.MethodGet, "/status", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, corpo = %q, esperava 200", rec.Code, rec.Body.String())
+	}
+	var got appStatusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("Unmarshal() error = %v, corpo = %q", err, rec.Body.String())
+	}
+	if !got.Cluster.Healthy || got.Cluster.Error != "" {
+		t.Errorf("Cluster = %+v, esperava Healthy=true sem erro", got.Cluster)
+	}
+	if !got.Database.Healthy || got.Database.Path != ":memory:" || got.Database.Error != "" {
+		t.Errorf("Database = %+v, esperava Healthy=true Path=\":memory:\" sem erro", got.Database)
+	}
+	if got.UptimeSeconds < 0 {
+		t.Errorf("UptimeSeconds = %v, esperava >= 0", got.UptimeSeconds)
+	}
+}
+
+// erroringClusterProvider simula um cluster indisponível (kubeconfig
+// ausente, contexto errado, timeout de rede) para testar o branch de erro
+// de handleAppStatus sem depender de um cluster real.
+type erroringClusterProvider struct{}
+
+func (erroringClusterProvider) GetClientset(ctx context.Context, clusterKey string) (kubernetes.Interface, error) {
+	return nil, errors.New("cluster indisponível (teste)")
+}
+
+func TestHandleAppStatus_ClusterIndisponivel(t *testing.T) {
+	server, _ := newTestServer(t, nil)
+	server.clusters = erroringClusterProvider{}
+
+	req := httptest.NewRequest(http.MethodGet, "/status", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, corpo = %q, esperava 503", rec.Code, rec.Body.String())
+	}
+	var got appStatusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("Unmarshal() error = %v, corpo = %q", err, rec.Body.String())
+	}
+	if got.Cluster.Healthy || got.Cluster.Error == "" {
+		t.Errorf("Cluster = %+v, esperava Healthy=false com Error preenchido", got.Cluster)
+	}
+	if !got.Database.Healthy {
+		t.Errorf("Database = %+v, esperava Healthy=true (indisponibilidade do cluster não afeta o DB)", got.Database)
+	}
+}
+
+func TestHandleAppStatus_BancoIndisponivel(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if err := store.Migrate(db); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+	components := store.NewComponentRepository(db)
+	executions := store.NewExecutionRepository(db)
+	clientset := fake.NewSimpleClientset()
+	broker := &build.Broker{
+		Cloner:     build.NewGitCloner(),
+		Builder:    build.NewDockerBuilder(),
+		Components: components,
+		Executions: executions,
+	}
+	runner := &controller.Runner{
+		ClusterProvider: stubClusterProvider{clientset: clientset},
+		Components:      components,
+		Executions:      executions,
+	}
+	server := NewServer(components, stubClusterProvider{clientset: clientset}, store.NewCleanupAuditRepository(db), broker, runner, db, ":memory:", web.StaticFS())
+	db.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/status", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, corpo = %q, esperava 503", rec.Code, rec.Body.String())
+	}
+	var got appStatusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("Unmarshal() error = %v, corpo = %q", err, rec.Body.String())
+	}
+	if got.Database.Healthy || got.Database.Error == "" {
+		t.Errorf("Database = %+v, esperava Healthy=false com Error preenchido", got.Database)
+	}
+}
+
 func TestSSEWriter_Write(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -733,7 +831,7 @@ func TestHandleLogs_Follow_StreamAteHttptestServer(t *testing.T) {
 		Components:      components,
 		Executions:      executions,
 	}
-	server := NewServer(components, stubClusterProvider{clientset: clientset}, store.NewCleanupAuditRepository(db), broker, runner, web.StaticFS())
+	server := NewServer(components, stubClusterProvider{clientset: clientset}, store.NewCleanupAuditRepository(db), broker, runner, db, ":memory:", web.StaticFS())
 	httpSrv := httptest.NewServer(server)
 	t.Cleanup(httpSrv.Close)
 

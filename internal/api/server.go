@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/lucasfeitozas/kubeforge/internal/build"
 	"github.com/lucasfeitozas/kubeforge/internal/controller"
@@ -32,6 +34,9 @@ type Server struct {
 	cleanupAudit store.CleanupAuditRepository
 	broker       *build.Broker
 	runner       *controller.Runner
+	db           *sql.DB
+	dbPath       string
+	startedAt    time.Time
 }
 
 // defaultCleanupNamespace é usado quando POST /cleanup não informa
@@ -41,10 +46,12 @@ type Server struct {
 const defaultCleanupNamespace = "default"
 
 // NewServer monta as rotas do Server. components, clusters, cleanupAudit,
-// broker e runner já devem estar prontos para uso (banco migrado,
-// kubeconfig acessível) — NewServer não valida nenhum dos cinco. staticFS
-// é o conteúdo de web/static (ver web.StaticFS, E7.S1), servido na raiz.
-func NewServer(components store.ComponentRepository, clusters k8s.ClusterProvider, cleanupAudit store.CleanupAuditRepository, broker *build.Broker, runner *controller.Runner, staticFS fs.FS) *Server {
+// broker, runner e db já devem estar prontos para uso (banco migrado,
+// kubeconfig acessível) — NewServer não valida nenhum deles. dbPath é o
+// caminho do arquivo SQLite (não derivável do *sql.DB), exposto por GET
+// /status (E8.S1). staticFS é o conteúdo de web/static (ver web.StaticFS,
+// E7.S1), servido na raiz.
+func NewServer(components store.ComponentRepository, clusters k8s.ClusterProvider, cleanupAudit store.CleanupAuditRepository, broker *build.Broker, runner *controller.Runner, db *sql.DB, dbPath string, staticFS fs.FS) *Server {
 	s := &Server{
 		mux:          http.NewServeMux(),
 		components:   components,
@@ -52,6 +59,9 @@ func NewServer(components store.ComponentRepository, clusters k8s.ClusterProvide
 		cleanupAudit: cleanupAudit,
 		broker:       broker,
 		runner:       runner,
+		db:           db,
+		dbPath:       dbPath,
+		startedAt:    time.Now(),
 	}
 	s.mux.HandleFunc("POST /components", s.handleCreateComponent)
 	s.mux.HandleFunc("GET /components", s.handleListComponents)
@@ -63,6 +73,7 @@ func NewServer(components store.ComponentRepository, clusters k8s.ClusterProvide
 	s.mux.HandleFunc("GET /components/{id}/status", s.handleStatus)
 	s.mux.HandleFunc("GET /components/{id}/logs", s.handleLogs)
 	s.mux.HandleFunc("POST /cleanup", s.handleCleanup)
+	s.mux.HandleFunc("GET /status", s.handleAppStatus)
 	s.mux.HandleFunc("GET /openapi.yaml", s.handleOpenAPISpec)
 	s.mux.HandleFunc("GET /swagger/{$}", s.handleSwaggerUI)
 	// Catch-all (E7.S1): qualquer caminho GET não reconhecido pelas rotas
@@ -400,6 +411,63 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Phase:   status.Phase,
 		Reason:  status.Reason,
 		Message: status.Message,
+	})
+}
+
+// appStatusResponse é o corpo JSON devolvido por GET /status (E8.S1) — saúde
+// do binário em si (conexão com o Minikube e com o SQLite), não o status de
+// um Componente (ver statusResponse/handleStatus acima).
+type appStatusResponse struct {
+	UptimeSeconds float64           `json:"uptimeSeconds"`
+	Cluster       clusterStatusDTO  `json:"cluster"`
+	Database      databaseStatusDTO `json:"database"`
+}
+
+type clusterStatusDTO struct {
+	Healthy           bool   `json:"healthy"`
+	KubernetesVersion string `json:"kubernetesVersion,omitempty"`
+	Error             string `json:"error,omitempty"`
+}
+
+type databaseStatusDTO struct {
+	Healthy bool   `json:"healthy"`
+	Path    string `json:"path"`
+	Error   string `json:"error,omitempty"`
+}
+
+// handleAppStatus reporta a saúde da conexão com o cluster Minikube
+// (reaproveitando s.clusters, mesmo padrão do startup em
+// cmd/kubeforge/main.go) e com o banco SQLite (db.PingContext), mais o
+// uptime do processo desde a construção do Server. Devolve 503 se qualquer
+// uma das duas dependências estiver indisponível, para permitir uso direto
+// como healthcheck (ver ADR 0023).
+func (s *Server) handleAppStatus(w http.ResponseWriter, r *http.Request) {
+	cluster := clusterStatusDTO{}
+	if clientset, err := s.clusters.GetClientset(r.Context(), k8s.MinikubeClusterKey); err != nil {
+		cluster.Error = err.Error()
+	} else if version, err := clientset.Discovery().ServerVersion(); err != nil {
+		cluster.Error = err.Error()
+	} else {
+		cluster.Healthy = true
+		cluster.KubernetesVersion = version.GitVersion
+	}
+
+	database := databaseStatusDTO{Path: s.dbPath}
+	if err := s.db.PingContext(r.Context()); err != nil {
+		database.Error = err.Error()
+	} else {
+		database.Healthy = true
+	}
+
+	status := http.StatusOK
+	if !cluster.Healthy || !database.Healthy {
+		status = http.StatusServiceUnavailable
+	}
+
+	writeJSON(w, status, appStatusResponse{
+		UptimeSeconds: time.Since(s.startedAt).Seconds(),
+		Cluster:       cluster,
+		Database:      database,
 	})
 }
 
