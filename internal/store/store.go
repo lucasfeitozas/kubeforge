@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/golang-migrate/migrate/v4"
 	migratesqlite "github.com/golang-migrate/migrate/v4/database/sqlite"
@@ -20,6 +21,7 @@ func Open(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("abrindo banco SQLite em %q: %w", dbPath, err)
 	}
 	db.SetMaxOpenConns(1) // SQLite serializa escritas; evita "database is locked"
+	slog.Debug("banco SQLite aberto", "db_path", dbPath)
 	return db, nil
 }
 
@@ -40,5 +42,6 @@ func Migrate(db *sql.DB) error {
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("aplicando migrations: %w", err)
 	}
+	slog.Debug("migrations aplicadas")
 	return nil
 }

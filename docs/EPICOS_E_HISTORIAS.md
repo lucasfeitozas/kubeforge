@@ -267,8 +267,8 @@ Convenção de rotulagem usada no `scripts/bootstrap_github.sh`:
 ### E8.S2 — Logs estruturados do binário
 **Como** desenvolvedor, **quero** logs estruturados (JSON ou texto legível) de todas as operações (build, run, cleanup), **para** depurar o próprio KubeForge.
 - Critérios de aceite:
-  - [ ] Uso consistente de `slog` em todos os pacotes
-  - [ ] Nível de log configurável via `LOG_LEVEL`
+  - [x] Uso consistente de `slog` em todos os pacotes
+  - [x] Nível de log configurável via `LOG_LEVEL`
 - Prioridade: baixa
 
 ---

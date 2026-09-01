@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -33,6 +34,9 @@ type config struct {
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, nil)))
 	loadDotenv()
+	// Reconfigurado após loadDotenv: LOG_LEVEL pode vir do .env, igual às
+	// demais KUBEFORGE_* env vars lidas por loadConfig/runCleanup.
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel()})))
 
 	if len(os.Args) > 1 && os.Args[1] == "cleanup" {
 		runCleanup(os.Args[2:])
@@ -48,6 +52,7 @@ func runServer() {
 		"http_port", cfg.httpPort,
 		"kubeconfig", cfg.kubeconfig,
 		"db_path", cfg.dbPath,
+		"log_level", envString("LOG_LEVEL", "info"),
 	)
 
 	db, err := store.Open(cfg.dbPath)
@@ -173,6 +178,26 @@ func envString(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// logLevel resolve o nível mínimo de log a partir de LOG_LEVEL (debug, info,
+// warn/warning, error — case-insensitive; ver .env.example). "info" é o
+// default quando a env var está ausente ou tem um valor não reconhecido.
+func logLevel() slog.Level {
+	raw := envString("LOG_LEVEL", "info")
+	switch strings.ToLower(raw) {
+	case "debug":
+		return slog.LevelDebug
+	case "info":
+		return slog.LevelInfo
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		slog.Warn("valor inválido para LOG_LEVEL, usando default", "value", raw, "default", "info")
+		return slog.LevelInfo
+	}
 }
 
 func envInt(key string, fallback int) int {
