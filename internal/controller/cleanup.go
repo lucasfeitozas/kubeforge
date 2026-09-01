@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/lucasfeitozas/kubeforge/internal/k8s"
 	"github.com/lucasfeitozas/kubeforge/internal/store"
@@ -66,8 +67,11 @@ func RunComponentCleanup(ctx context.Context, provider k8s.ClusterProvider, comp
 // runCleanupWithSelector implementa RunCleanup/RunComponentCleanup,
 // parametrizada pelo label selector usado para listar Jobs/Pods/PVCs.
 func runCleanupWithSelector(ctx context.Context, provider k8s.ClusterProvider, clusterKey, namespace, labelSelector string) ([]CleanupResult, error) {
+	slog.Info("cleanup iniciado", "cluster", clusterKey, "namespace", namespace, "selector", labelSelector)
+
 	clientset, err := provider.GetClientset(ctx, clusterKey)
 	if err != nil {
+		slog.Error("cleanup falhou", "cluster", clusterKey, "namespace", namespace, "error", err)
 		return nil, fmt.Errorf("obtendo clientset do cluster %q: %w", clusterKey, err)
 	}
 
@@ -76,18 +80,22 @@ func runCleanupWithSelector(ctx context.Context, provider k8s.ClusterProvider, c
 
 	jobs, err := clientset.BatchV1().Jobs(namespace).List(ctx, listOpts)
 	if err != nil {
+		slog.Error("cleanup falhou", "namespace", namespace, "error", err)
 		return results, fmt.Errorf("listando Jobs rotulados no namespace %q: %w", namespace, err)
 	}
 	background := metav1.DeletePropagationBackground
 	for _, job := range jobs.Items {
 		if err := clientset.BatchV1().Jobs(namespace).Delete(ctx, job.Name, metav1.DeleteOptions{PropagationPolicy: &background}); err != nil {
+			slog.Error("cleanup falhou", "namespace", namespace, "error", err)
 			return results, fmt.Errorf("removendo Job %q no namespace %q: %w", job.Name, namespace, err)
 		}
+		slog.Info("recurso removido", "kind", "Job", "name", job.Name, "namespace", namespace)
 		results = append(results, CleanupResult{Kind: "Job", Name: job.Name, Namespace: namespace})
 	}
 
 	pods, err := clientset.CoreV1().Pods(namespace).List(ctx, listOpts)
 	if err != nil {
+		slog.Error("cleanup falhou", "namespace", namespace, "error", err)
 		return results, fmt.Errorf("listando Pods rotulados no namespace %q: %w", namespace, err)
 	}
 	for _, pod := range pods.Items {
@@ -95,22 +103,28 @@ func runCleanupWithSelector(ctx context.Context, provider k8s.ClusterProvider, c
 			if apierrors.IsNotFound(err) {
 				continue
 			}
+			slog.Error("cleanup falhou", "namespace", namespace, "error", err)
 			return results, fmt.Errorf("removendo Pod %q no namespace %q: %w", pod.Name, namespace, err)
 		}
+		slog.Info("recurso removido", "kind", "Pod", "name", pod.Name, "namespace", namespace)
 		results = append(results, CleanupResult{Kind: "Pod", Name: pod.Name, Namespace: namespace})
 	}
 
 	pvcs, err := clientset.CoreV1().PersistentVolumeClaims(namespace).List(ctx, listOpts)
 	if err != nil {
+		slog.Error("cleanup falhou", "namespace", namespace, "error", err)
 		return results, fmt.Errorf("listando PersistentVolumeClaims rotuladas no namespace %q: %w", namespace, err)
 	}
 	for _, pvc := range pvcs.Items {
 		if err := clientset.CoreV1().PersistentVolumeClaims(namespace).Delete(ctx, pvc.Name, metav1.DeleteOptions{}); err != nil {
+			slog.Error("cleanup falhou", "namespace", namespace, "error", err)
 			return results, fmt.Errorf("removendo PersistentVolumeClaim %q no namespace %q: %w", pvc.Name, namespace, err)
 		}
+		slog.Info("recurso removido", "kind", "PersistentVolumeClaim", "name", pvc.Name, "namespace", namespace)
 		results = append(results, CleanupResult{Kind: "PersistentVolumeClaim", Name: pvc.Name, Namespace: namespace})
 	}
 
+	slog.Info("cleanup concluído", "namespace", namespace, "recursos_removidos", len(results))
 	return results, nil
 }
 

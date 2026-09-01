@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/lucasfeitozas/kubeforge/internal/store"
@@ -69,6 +70,7 @@ func (b *Broker) Run(ctx context.Context, component *store.Component, cloneDestD
 	if err := b.Executions.Create(ctx, execution); err != nil {
 		return fmt.Errorf("criando execution para o componente %q: %w", component.ID, err)
 	}
+	slog.Info("build iniciada", "component_id", component.ID, "execution_id", execution.ID, "no_cache", noCache)
 
 	startedAt := time.Now().UTC().Truncate(time.Millisecond)
 	if err := b.Components.UpdateBuildStatus(ctx, component.ID, store.PhaseBuilding, "", ""); err != nil {
@@ -87,6 +89,7 @@ func (b *Broker) Run(ctx context.Context, component *store.Component, cloneDestD
 	if err != nil {
 		return b.fail(ctx, component.ID, execution.ID, startedAt, fmt.Errorf("clonando componente %q: %w", component.ID, err))
 	}
+	slog.Debug("clone concluído", "component_id", component.ID, "execution_id", execution.ID, "commit_sha", cloneResult.CommitSHA)
 
 	buildSpec, err := buildBuildSpec(component.Build, *cloneResult, noCache)
 	if err != nil {
@@ -115,12 +118,14 @@ func (b *Broker) Run(ctx context.Context, component *store.Component, cloneDestD
 	if err := b.Executions.UpdatePhase(ctx, execution.ID, executionPhaseSucceeded, &startedAt, &completedAt); err != nil {
 		return fmt.Errorf("atualizando fase da execution %q para Succeeded: %w", execution.ID, err)
 	}
+	slog.Info("build concluída", "component_id", component.ID, "execution_id", execution.ID, "image_tag", buildResult.ImageTag, "digest", buildResult.Digest)
 	return nil
 }
 
 // fail marca o Componente como Failed (com a mensagem de causeErr) e a
 // Execution como Failed, e devolve causeErr para o chamador de Run.
 func (b *Broker) fail(ctx context.Context, componentID, executionID string, startedAt time.Time, causeErr error) error {
+	slog.Error("build falhou", "component_id", componentID, "execution_id", executionID, "error", causeErr)
 	completedAt := time.Now().UTC().Truncate(time.Millisecond)
 
 	if err := b.Components.UpdateBuildStatus(ctx, componentID, store.PhaseFailed, "", causeErr.Error()); err != nil {

@@ -57,9 +57,6 @@ func runCleanup(args []string) {
 		slog.Error("falha ao registrar auditoria de cleanup", "error", auditErr)
 	}
 
-	for _, res := range results {
-		slog.Info("recurso removido", "kind", res.Kind, "name", res.Name, "namespace", res.Namespace)
-	}
 	fmt.Printf("%d recurso(s) removido(s) no namespace %q\n", len(results), *namespace)
 
 	if runErr != nil {

@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -74,5 +75,6 @@ func (p *MinikubeProvider) GetClientset(ctx context.Context, clusterKey string) 
 	if err != nil {
 		return nil, fmt.Errorf("erro ao criar clientset k8s: %w", err)
 	}
+	slog.Debug("clientset k8s obtido", "cluster", clusterKey, "kubeconfig", p.kubeconfigPath)
 	return clientset, nil
 }

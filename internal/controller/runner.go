@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/lucasfeitozas/kubeforge/internal/k8s"
@@ -71,6 +72,7 @@ func (r *Runner) Run(ctx context.Context, component *store.Component) error {
 	if err := r.Executions.Create(ctx, execution); err != nil {
 		return fmt.Errorf("criando execution para o componente %q: %w", component.ID, err)
 	}
+	slog.Info("execução iniciada", "component_id", component.ID, "execution_id", execution.ID)
 
 	startedAt := time.Now().UTC().Truncate(time.Millisecond)
 	if err := r.Components.UpdateBuildStatus(ctx, component.ID, store.PhaseRunning, component.BuildImageDigest, ""); err != nil {
@@ -117,6 +119,7 @@ func (r *Runner) Run(ctx context.Context, component *store.Component) error {
 		return r.fail(ctx, component.ID, execution.ID, component.BuildImageDigest, startedAt,
 			fmt.Errorf("executando Job principal do componente %q: %w", component.ID, err))
 	}
+	slog.Info("job principal concluído", "component_id", component.ID, "execution_id", execution.ID, "job", mainJob.Name, "phase", mainPhase)
 
 	// hooks.postRun é disparado independente de mainPhase ser Succeeded ou
 	// Failed — critério de aceite E4.S3/AC1: "Controller observa phase
@@ -135,6 +138,7 @@ func (r *Runner) Run(ctx context.Context, component *store.Component) error {
 			return r.fail(ctx, component.ID, execution.ID, component.BuildImageDigest, startedAt,
 				fmt.Errorf("executando Job de verificação do componente %q: %w", component.ID, err))
 		}
+		slog.Info("job de verificação concluído", "component_id", component.ID, "execution_id", execution.ID, "job", postRunPlan.Job.Name, "phase", postRunPhase)
 		finalPhase = determineFinalPhase(mainPhase, postRunPhase, postRunPlan.ContinueOnError)
 	}
 
@@ -145,6 +149,7 @@ func (r *Runner) Run(ctx context.Context, component *store.Component) error {
 // infraestrutura/interpretação (não uma fase Failed legitimamente
 // observada num Job — ver finalize), e devolve causeErr para o chamador.
 func (r *Runner) fail(ctx context.Context, componentID, executionID, digest string, startedAt time.Time, causeErr error) error {
+	slog.Error("execução falhou", "component_id", componentID, "execution_id", executionID, "error", causeErr)
 	completedAt := time.Now().UTC().Truncate(time.Millisecond)
 
 	if err := r.Components.UpdateBuildStatus(ctx, componentID, store.PhaseFailed, digest, causeErr.Error()); err != nil {
@@ -175,8 +180,10 @@ func (r *Runner) finalize(ctx context.Context, componentID, executionID, digest 
 		return fmt.Errorf("atualizando fase da execution %q para %q: %w", executionID, executionPhase, err)
 	}
 	if errMsg != "" {
+		slog.Error("execução terminou como Failed", "component_id", componentID, "execution_id", executionID, "error", errMsg)
 		return errors.New(errMsg)
 	}
+	slog.Info("execução concluída com sucesso", "component_id", componentID, "execution_id", executionID)
 	return nil
 }
 
